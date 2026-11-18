@@ -1,5 +1,6 @@
 const std = @import("std");
 const Io = std.Io;
+const init = @import("init.zig");
 
 pub const Context = struct {
     io: Io,
@@ -42,7 +43,7 @@ pub fn runCommand(ctx: Context, args: []const [:0]const u8) !void {
 
     switch (cmd.type) {
         .init => {
-            try runInit(ctx, cmd.args);
+            try init.run(ctx, cmd.args);
         },
         .build => {
             return;
@@ -64,60 +65,6 @@ pub fn runCommand(ctx: Context, args: []const [:0]const u8) !void {
         },
     }
 }
-
-const Language = enum { c, @"c++" };
-
-fn runInit(ctx: Context, args: []const [:0]const u8) !void {
-    if (args.len != 1) {
-        try ctx.err.print("invalid arguments. Run weld help init to see example usage\n", .{});
-        return;
-    }
-
-    const language = std.meta.stringToEnum(Language, args[0]) orelse {
-        try ctx.err.print("invalid arguments. Run weld help init to see example usage\n", .{});
-        return;
-    };
-
-    const status = try ctx.cwd.createDirPathStatus(ctx.io, "src", .default_dir);
-    switch (status) {
-        .created => try ctx.out.print("created /src directory\n", .{}),
-        .existed => try ctx.out.print("src/ already exists\n", .{}),
-    }
-
-    const build_file: []const u8 = switch (language) {
-        .c => "build.c",
-        .@"c++" => "build.cpp",
-    };
-
-    const template: []const u8 = switch (language) {
-        .c => build_c_template,
-        .@"c++" => build_cpp_template,
-    };
-
-    ctx.cwd.writeFile(ctx.io, .{
-        .sub_path = build_file,
-        .data = template,
-        .flags = .{ .exclusive = true },
-    }) catch |err| switch (err) {
-        error.PathAlreadyExists => {
-            try ctx.out.print("{s} already exists\n", .{build_file});
-            return;
-        },
-        else => return err,
-    };
-
-    try ctx.out.print("created {s}\n", .{build_file});
-}
-
-const build_c_template =
-    \\// weld build script (C). Placeholder until weld.h exists.
-    \\
-;
-
-const build_cpp_template =
-    \\// weld build script (C++). Placeholder until weld.hpp exists.
-    \\
-;
 
 const usage =
     \\weld <command> [options]
