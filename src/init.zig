@@ -14,16 +14,66 @@ const Options = struct {
 pub fn run(ctx: Context, args: []const [:0]const u8) !void {
     const options = parseOptions(args) orelse {
         try ctx.err.print("invalid arguments. Run weld help init to see example usage\n", .{});
-        return;
+        return error.Reported;
     };
-
-    try createDir(ctx, "src");
 
     switch (options.project_type) {
         .library => {
-            try createDir(ctx, "include");
+            const project_name = resolveProjectName(ctx) catch |err| switch (err) {
+                error.EmptyProjectName => {
+                    try ctx.err.print("project name can't be empty\n", .{});
+                    return error.Reported;
+                },
+                else => return err,
+            };
+
+            const ident = transformNameIntoIdentifier(ctx.arena, project_name) catch |err| switch (err) {
+                error.InvalidIdentifier => {
+                    try ctx.err.print("project name '{s}' can't start with a digit\n", .{project_name});
+                    return error.Reported;
+                },
+                else => return err,
+            };
+
+            try createDir(ctx, "src");
+
+            const include_path = try std.fs.path.join(ctx.arena, &.{ "include", project_name });
+            try createDir(ctx, include_path);
+
+            var include_template: []const u8 = undefined;
+            var src_template: []const u8 = undefined;
+            var src_file_extension: []const u8 = undefined;
+            var include_file_extension: []const u8 = undefined;
+
+            switch (options.language) {
+                .c => {
+                    include_template = @embedFile("templates/lib.h");
+                    src_template = @embedFile("templates/lib.c");
+                    src_file_extension = ".c";
+                    include_file_extension = ".h";
+                },
+                .@"c++" => {
+                    include_template = @embedFile("templates/lib.hpp");
+                    src_template = @embedFile("templates/lib.cpp");
+                    src_file_extension = ".cpp";
+                    include_file_extension = ".hpp";
+                },
+            }
+
+            const include_file_name = try std.mem.concat(ctx.arena, u8, &.{ project_name, include_file_extension });
+            const src_file_name = try std.mem.concat(ctx.arena, u8, &.{ project_name, src_file_extension });
+
+            const include_file_content = try fillTemplate(ctx.arena, include_template, project_name, ident);
+            const src_file_content = try fillTemplate(ctx.arena, src_template, project_name, ident);
+
+            const include_file_path = try std.fs.path.join(ctx.arena, &.{ include_path, include_file_name });
+            const src_file_path = try std.fs.path.join(ctx.arena, &.{ "src", src_file_name });
+
+            _ = try writeNewFile(ctx, include_file_path, include_file_content);
+            _ = try writeNewFile(ctx, src_file_path, src_file_content);
         },
         .executable => {
+            try createDir(ctx, "src");
             try writeMainFile(ctx, options.language);
         },
     }
@@ -106,7 +156,7 @@ fn initGit(ctx: Context) !void {
 
     if (!result.term.success()) {
         try ctx.err.print("git init failed: {s}", .{result.stderr});
-        return;
+        return error.Reported;
     }
 
     try ctx.out.print("initialized git repository\n", .{});
@@ -165,6 +215,13 @@ fn writeNewFile(ctx: Context, path: []const u8, content: []const u8) !bool {
 
     try ctx.out.print("created {s}\n", .{path});
     return true;
+}
+
+fn fillTemplate(allocator: std.mem.Allocator, template: []const u8, name: []const u8, ident: []const u8) ![]u8 {
+    const with_name = try std.mem.replaceOwned(u8, allocator, template, "WELD_NAME", name);
+    defer allocator.free(with_name);
+
+    return std.mem.replaceOwned(u8, allocator, with_name, "WELD_IDENT", ident);
 }
 
 // ---------------------------------------------------------------- tests
@@ -281,4 +338,92 @@ test "transformNameIntoIdentifier: replaces characters that are not allowed in C
 
 test "transformNameIntoIdentifier: a leading digit is an error" {
     try testing.expectError(error.InvalidIdentifier, transformNameIntoIdentifier(testing.allocator, "2048-game"));
+}
+
+test "fillTemplate: replaces both placeholders everywhere" {
+    const result = try fillTemplate(
+        testing.allocator,
+        "#include <WELD_NAME/WELD_NAME.h>\nvoid WELD_IDENT_say_hello(void);",
+        "my-lib",
+        "my_lib",
+    );
+    defer testing.allocator.free(result);
+    try testing.expectEqualStrings("#include <my-lib/my-lib.h>\nvoid my_lib_say_hello(void);", result);
+}
+
+test "resolveProjectName: gives the name of the directory" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var project_dir = try tmp.dir.createDirPathOpen(testing.io, "my-lib", .{});
+    defer project_dir.close(testing.io);
+
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    var output: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer output.deinit();
+    var ctx = testContext(project_dir, &output.writer);
+    ctx.arena = arena.allocator();
+
+    try testing.expectEqualStrings("my-lib", try resolveProjectName(ctx));
+}
+
+test "writeMainFile: writes src/main.cpp for C++" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var output: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer output.deinit();
+    const ctx = testContext(tmp.dir, &output.writer);
+
+    try createDir(ctx, "src");
+    try writeMainFile(ctx, .@"c++");
+
+    const content = try tmp.dir.readFileAlloc(testing.io, "src/main.cpp", testing.allocator, .limited(4096));
+    defer testing.allocator.free(content);
+    try testing.expectEqualStrings(@embedFile("templates/main.cpp"), content);
+}
+
+test "run: a C library project gets a filled header and source" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var project_dir = try tmp.dir.createDirPathOpen(testing.io, "my-lib", .{});
+    defer project_dir.close(testing.io);
+
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    var output: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer output.deinit();
+    var ctx = testContext(project_dir, &output.writer);
+    ctx.arena = arena.allocator();
+
+    try run(ctx, &.{ "c", "--lib", "--no-git" });
+
+    const header = try project_dir.readFileAlloc(testing.io, "include/my-lib/my-lib.h", testing.allocator, .limited(4096));
+    defer testing.allocator.free(header);
+    try testing.expect(std.mem.indexOf(u8, header, "void my_lib_say_hello(void);") != null);
+
+    const source = try project_dir.readFileAlloc(testing.io, "src/my-lib.c", testing.allocator, .limited(4096));
+    defer testing.allocator.free(source);
+    try testing.expect(std.mem.indexOf(u8, source, "#include <my-lib/my-lib.h>") != null);
+
+    try project_dir.access(testing.io, "build.c", .{});
+}
+
+test "run: a library name starting with a digit creates nothing" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var project_dir = try tmp.dir.createDirPathOpen(testing.io, "2048-game", .{});
+    defer project_dir.close(testing.io);
+
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    var output: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer output.deinit();
+    var ctx = testContext(project_dir, &output.writer);
+    ctx.arena = arena.allocator();
+
+    try testing.expectError(error.Reported, run(ctx, &.{ "c", "--lib", "--no-git" }));
+
+    try testing.expectEqualStrings("project name '2048-game' can't start with a digit\n", output.written());
+    try testing.expectError(error.FileNotFound, project_dir.access(testing.io, "src", .{}));
+    try testing.expectError(error.FileNotFound, project_dir.access(testing.io, "build.c", .{}));
 }
