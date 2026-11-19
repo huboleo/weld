@@ -121,6 +121,33 @@ fn writeGitignore(ctx: Context) !void {
     }
 }
 
+fn resolveProjectName(ctx: Context) ![]const u8 {
+    const full_path = try ctx.cwd.realPathFileAlloc(ctx.io, ".", ctx.arena);
+    const lib_name = std.fs.path.basename(full_path);
+
+    if (lib_name.len == 0) {
+        return error.EmptyProjectName;
+    }
+
+    return lib_name;
+}
+
+fn transformNameIntoIdentifier(allocator: std.mem.Allocator, name: []const u8) ![]u8 {
+    if (std.ascii.isDigit(name[0])) {
+        return error.InvalidIdentifier;
+    }
+
+    const ident = try allocator.dupe(u8, name);
+
+    for (ident) |*c| {
+        if (!std.ascii.isAlphanumeric(c.*) and c.* != '_') {
+            c.* = '_';
+        }
+    }
+
+    return ident;
+}
+
 /// Writes `content` to `path` unless the file already exists; existing files are never
 /// overwritten. Prints what happened and returns true if the file was created.
 fn writeNewFile(ctx: Context, path: []const u8, content: []const u8) !bool {
@@ -234,4 +261,24 @@ test "writeGitignore: ignores weld-out" {
     const content = try tmp.dir.readFileAlloc(testing.io, ".gitignore", testing.allocator, .limited(4096));
     defer testing.allocator.free(content);
     try testing.expectEqualStrings("/weld-out/\n", content);
+}
+
+test "transformNameIntoIdentifier: replaces characters that are not allowed in C" {
+    const cases = [_][2][]const u8{
+        .{ "mylib", "mylib" },
+        .{ "my-lib", "my_lib" },
+        .{ "my.lib", "my_lib" },
+        .{ "my lib", "my_lib" },
+        .{ "my_lib2", "my_lib2" },
+    };
+
+    for (cases) |case| {
+        const ident = try transformNameIntoIdentifier(testing.allocator, case[0]);
+        defer testing.allocator.free(ident);
+        try testing.expectEqualStrings(case[1], ident);
+    }
+}
+
+test "transformNameIntoIdentifier: a leading digit is an error" {
+    try testing.expectError(error.InvalidIdentifier, transformNameIntoIdentifier(testing.allocator, "2048-game"));
 }
