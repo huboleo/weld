@@ -18,6 +18,11 @@ pub fn run(ctx: Context, args: []const [:0]const u8) !void {
     };
 
     try createSrcDir(ctx);
+
+    if (options.project_type == .library) {
+        try createIncludeDir(ctx);
+    }
+
     try writeBuildScript(ctx, options.language, options.project_type);
 
     if (options.git) {
@@ -50,6 +55,14 @@ fn createSrcDir(ctx: Context) !void {
     switch (status) {
         .created => try ctx.out.print("created /src directory\n", .{}),
         .existed => try ctx.out.print("src/ already exists\n", .{}),
+    }
+}
+
+fn createIncludeDir(ctx: Context) !void {
+    const status = try ctx.cwd.createDirPathStatus(ctx.io, "include", .default_dir);
+    switch (status) {
+        .created => try ctx.out.print("created include/\n", .{}),
+        .existed => try ctx.out.print("include/ already exists\n", .{}),
     }
 }
 
