@@ -140,3 +140,95 @@ const build_cpp_lib_template =
     \\// weld build script (C++). Placeholder until weld.hpp exists.
     \\
 ;
+
+// ---------------------------------------------------------------- tests
+
+const testing = std.testing;
+
+fn testContext(dir: std.Io.Dir, writer: *std.Io.Writer) Context {
+    return .{
+        .io = testing.io,
+        .arena = testing.allocator,
+        .cwd = dir,
+        .out = writer,
+        .err = writer,
+    };
+}
+
+test "parseOptions: language only gives the defaults" {
+    const options = parseOptions(&.{"c"}).?;
+    try testing.expectEqual(Language.c, options.language);
+    try testing.expectEqual(ProjectType.executable, options.project_type);
+    try testing.expectEqual(true, options.git);
+}
+
+test "parseOptions: flags change the defaults" {
+    const options = parseOptions(&.{ "c++", "--lib", "--no-git" }).?;
+    try testing.expectEqual(Language.@"c++", options.language);
+    try testing.expectEqual(ProjectType.library, options.project_type);
+    try testing.expectEqual(false, options.git);
+}
+
+test "parseOptions: invalid arguments give null" {
+    try testing.expect(parseOptions(&.{}) == null);
+    try testing.expect(parseOptions(&.{"rust"}) == null);
+    try testing.expect(parseOptions(&.{ "c", "--foo" }) == null);
+    try testing.expect(parseOptions(&.{ "--lib", "c" }) == null);
+}
+
+test "createSrcDir: creates src/ and accepts an existing one" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var output: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer output.deinit();
+    const ctx = testContext(tmp.dir, &output.writer);
+
+    try createSrcDir(ctx);
+    try createSrcDir(ctx);
+
+    try tmp.dir.access(testing.io, "src", .{});
+}
+
+test "writeBuildScript: writes the template for the language and project type" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var output: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer output.deinit();
+    const ctx = testContext(tmp.dir, &output.writer);
+
+    try writeBuildScript(ctx, .@"c++", .library);
+
+    const content = try tmp.dir.readFileAlloc(testing.io, "build.cpp", testing.allocator, .limited(4096));
+    defer testing.allocator.free(content);
+    try testing.expectEqualStrings(build_cpp_lib_template, content);
+}
+
+test "writeBuildScript: never overwrites an existing file" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var output: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer output.deinit();
+    const ctx = testContext(tmp.dir, &output.writer);
+
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "build.c", .data = "mine" });
+    try writeBuildScript(ctx, .c, .executable);
+
+    const content = try tmp.dir.readFileAlloc(testing.io, "build.c", testing.allocator, .limited(4096));
+    defer testing.allocator.free(content);
+    try testing.expectEqualStrings("mine", content);
+    try testing.expectEqualStrings("build.c already exists\n", output.written());
+}
+
+test "writeGitignore: ignores weld-out" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var output: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer output.deinit();
+    const ctx = testContext(tmp.dir, &output.writer);
+
+    try writeGitignore(ctx);
+
+    const content = try tmp.dir.readFileAlloc(testing.io, ".gitignore", testing.allocator, .limited(4096));
+    defer testing.allocator.free(content);
+    try testing.expectEqualStrings("/weld-out/\n", content);
+}
