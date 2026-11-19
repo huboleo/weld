@@ -74,12 +74,12 @@ fn writeBuildScript(ctx: Context, language: Language, project_type: ProjectType)
 
     const template: []const u8 = switch (language) {
         .c => switch (project_type) {
-            .executable => build_c_exec_template,
-            .library => build_c_lib_template,
+            .executable => @embedFile("templates/build_exe.c"),
+            .library => @embedFile("templates/build_lib.c"),
         },
         .@"c++" => switch (project_type) {
-            .executable => build_cpp_exec_template,
-            .library => build_cpp_lib_template,
+            .executable => @embedFile("templates/build_exe.cpp"),
+            .library => @embedFile("templates/build_lib.cpp"),
         },
     };
 
@@ -116,7 +116,7 @@ fn initGit(ctx: Context) !void {
 fn writeGitignore(ctx: Context) !void {
     ctx.cwd.writeFile(ctx.io, .{
         .sub_path = ".gitignore",
-        .data = gitignore_template,
+        .data = @embedFile("templates/gitignore"),
         .flags = .{ .exclusive = true },
     }) catch |err| switch (err) {
         error.PathAlreadyExists => {
@@ -128,31 +128,6 @@ fn writeGitignore(ctx: Context) !void {
 
     try ctx.out.print("created .gitignore\n", .{});
 }
-
-const gitignore_template =
-    \\/weld-out/
-    \\
-;
-
-const build_c_exec_template =
-    \\// weld build script (C). Placeholder until weld.h exists.
-    \\
-;
-
-const build_cpp_exec_template =
-    \\// weld build script (C++). Placeholder until weld.hpp exists.
-    \\
-;
-
-const build_c_lib_template =
-    \\// weld build script (C). Placeholder until weld.h exists.
-    \\
-;
-
-const build_cpp_lib_template =
-    \\// weld build script (C++). Placeholder until weld.hpp exists.
-    \\
-;
 
 // ---------------------------------------------------------------- tests
 
@@ -213,7 +188,7 @@ test "writeBuildScript: writes the template for the language and project type" {
 
     const content = try tmp.dir.readFileAlloc(testing.io, "build.cpp", testing.allocator, .limited(4096));
     defer testing.allocator.free(content);
-    try testing.expectEqualStrings(build_cpp_lib_template, content);
+    try testing.expectEqualStrings(@embedFile("templates/build_lib.cpp"), content);
 }
 
 test "writeBuildScript: never overwrites an existing file" {
