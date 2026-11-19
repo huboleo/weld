@@ -33,11 +33,11 @@ pub fn runCommand(ctx: Context, args: []const [:0]const u8) !void {
     const cmd = parse(args[1..]) catch |err| switch (err) {
         error.MissingCommand => {
             try ctx.err.print("Missing command. Example usage:\n{s}", .{usage});
-            return error.Reported;
+            return error.AlreadyReported;
         },
         error.UnknownCommand => {
             try ctx.err.print("Unknown command. Example usage:\n{s}", .{usage});
-            return error.Reported;
+            return error.AlreadyReported;
         },
     };
 

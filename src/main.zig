@@ -21,10 +21,10 @@ pub fn main(init: std.process.Init) !u8 {
 
     defer ctx.out.flush() catch {};
 
-    // Commands print their own error message and return error.Reported, so here it only
+    // Commands print their own error message and return error.AlreadyReported, so here it only
     // becomes exit code 1. Any other error is unexpected and keeps Zig's error trace.
     cli.runCommand(ctx, args) catch |err| switch (err) {
-        error.Reported => return 1,
+        error.AlreadyReported => return 1,
         else => return err,
     };
 

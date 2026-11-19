@@ -14,7 +14,7 @@ const Options = struct {
 pub fn run(ctx: Context, args: []const [:0]const u8) !void {
     const options = parseOptions(args) orelse {
         try ctx.err.print("invalid arguments. Run weld help init to see example usage\n", .{});
-        return error.Reported;
+        return error.AlreadyReported;
     };
 
     switch (options.project_type) {
@@ -22,7 +22,7 @@ pub fn run(ctx: Context, args: []const [:0]const u8) !void {
             const project_name = resolveProjectName(ctx) catch |err| switch (err) {
                 error.EmptyProjectName => {
                     try ctx.err.print("project name can't be empty\n", .{});
-                    return error.Reported;
+                    return error.AlreadyReported;
                 },
                 else => return err,
             };
@@ -30,7 +30,7 @@ pub fn run(ctx: Context, args: []const [:0]const u8) !void {
             const ident = transformNameIntoIdentifier(ctx.arena, project_name) catch |err| switch (err) {
                 error.InvalidIdentifier => {
                     try ctx.err.print("project name '{s}' can't start with a digit\n", .{project_name});
-                    return error.Reported;
+                    return error.AlreadyReported;
                 },
                 else => return err,
             };
@@ -156,7 +156,7 @@ fn initGit(ctx: Context) !void {
 
     if (!result.term.success()) {
         try ctx.err.print("git init failed: {s}", .{result.stderr});
-        return error.Reported;
+        return error.AlreadyReported;
     }
 
     try ctx.out.print("initialized git repository\n", .{});
@@ -421,7 +421,7 @@ test "run: a library name starting with a digit creates nothing" {
     var ctx = testContext(project_dir, &output.writer);
     ctx.arena = arena.allocator();
 
-    try testing.expectError(error.Reported, run(ctx, &.{ "c", "--lib", "--no-git" }));
+    try testing.expectError(error.AlreadyReported, run(ctx, &.{ "c", "--lib", "--no-git" }));
 
     try testing.expectEqualStrings("project name '2048-game' can't start with a digit\n", output.written());
     try testing.expectError(error.FileNotFound, project_dir.access(testing.io, "src", .{}));
