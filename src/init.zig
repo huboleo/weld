@@ -71,7 +71,30 @@ fn initGit(ctx: Context) !void {
     }
 
     try ctx.out.print("initialized git repository\n", .{});
+
+    try writeGitignore(ctx);
 }
+
+fn writeGitignore(ctx: Context) !void {
+    ctx.cwd.writeFile(ctx.io, .{
+        .sub_path = ".gitignore",
+        .data = gitignore_template,
+        .flags = .{ .exclusive = true },
+    }) catch |err| switch (err) {
+        error.PathAlreadyExists => {
+            try ctx.out.print(".gitignore already exists, make sure it contains /weld-out/\n", .{});
+            return;
+        },
+        else => return err,
+    };
+
+    try ctx.out.print("created .gitignore\n", .{});
+}
+
+const gitignore_template =
+    \\/weld-out/
+    \\
+;
 
 const build_c_template =
     \\// weld build script (C). Placeholder until weld.h exists.
