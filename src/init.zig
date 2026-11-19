@@ -88,19 +88,7 @@ fn writeBuildScript(ctx: Context, language: Language, project_type: ProjectType)
         },
     };
 
-    ctx.cwd.writeFile(ctx.io, .{
-        .sub_path = build_file,
-        .data = template,
-        .flags = .{ .exclusive = true },
-    }) catch |err| switch (err) {
-        error.PathAlreadyExists => {
-            try ctx.out.print("{s} already exists\n", .{build_file});
-            return;
-        },
-        else => return err,
-    };
-
-    try ctx.out.print("created {s}\n", .{build_file});
+    _ = try writeNewFile(ctx, build_file, template);
 }
 
 fn writeMainFile(ctx: Context, language: Language) !void {
@@ -114,19 +102,7 @@ fn writeMainFile(ctx: Context, language: Language) !void {
         .@"c++" => @embedFile("templates/main.cpp"),
     };
 
-    ctx.cwd.writeFile(ctx.io, .{
-        .sub_path = main_file,
-        .data = template,
-        .flags = .{ .exclusive = true },
-    }) catch |err| switch (err) {
-        error.PathAlreadyExists => {
-            try ctx.out.print("{s} already exists\n", .{main_file});
-            return;
-        },
-        else => return err,
-    };
-
-    try ctx.out.print("created {s}\n", .{main_file});
+    _ = try writeNewFile(ctx, main_file, template);
 }
 
 fn initGit(ctx: Context) !void {
@@ -145,19 +121,29 @@ fn initGit(ctx: Context) !void {
 }
 
 fn writeGitignore(ctx: Context) !void {
+    const created = try writeNewFile(ctx, ".gitignore", @embedFile("templates/gitignore"));
+    if (!created) {
+        try ctx.out.print("make sure .gitignore contains /weld-out/\n", .{});
+    }
+}
+
+/// Writes `content` to `path` unless the file already exists; existing files are never
+/// overwritten. Prints what happened and returns true if the file was created.
+fn writeNewFile(ctx: Context, path: []const u8, content: []const u8) !bool {
     ctx.cwd.writeFile(ctx.io, .{
-        .sub_path = ".gitignore",
-        .data = @embedFile("templates/gitignore"),
+        .sub_path = path,
+        .data = content,
         .flags = .{ .exclusive = true },
     }) catch |err| switch (err) {
         error.PathAlreadyExists => {
-            try ctx.out.print(".gitignore already exists, make sure it contains /weld-out/\n", .{});
-            return;
+            try ctx.out.print("{s} already exists\n", .{path});
+            return false;
         },
         else => return err,
     };
 
-    try ctx.out.print("created .gitignore\n", .{});
+    try ctx.out.print("created {s}\n", .{path});
+    return true;
 }
 
 // ---------------------------------------------------------------- tests
