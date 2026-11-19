@@ -19,8 +19,13 @@ pub fn run(ctx: Context, args: []const [:0]const u8) !void {
 
     try createSrcDir(ctx);
 
-    if (options.project_type == .library) {
-        try createIncludeDir(ctx);
+    switch (options.project_type) {
+        .library => {
+            try createIncludeDir(ctx);
+        },
+        .executable => {
+            try writeMainFile(ctx, options.language);
+        },
     }
 
     try writeBuildScript(ctx, options.language, options.project_type);
@@ -96,6 +101,32 @@ fn writeBuildScript(ctx: Context, language: Language, project_type: ProjectType)
     };
 
     try ctx.out.print("created {s}\n", .{build_file});
+}
+
+fn writeMainFile(ctx: Context, language: Language) !void {
+    const main_file: []const u8 = switch (language) {
+        .c => "src/main.c",
+        .@"c++" => "src/main.cpp",
+    };
+
+    const template: []const u8 = switch (language) {
+        .c => @embedFile("templates/main.c"),
+        .@"c++" => @embedFile("templates/main.cpp"),
+    };
+
+    ctx.cwd.writeFile(ctx.io, .{
+        .sub_path = main_file,
+        .data = template,
+        .flags = .{ .exclusive = true },
+    }) catch |err| switch (err) {
+        error.PathAlreadyExists => {
+            try ctx.out.print("{s} already exists\n", .{main_file});
+            return;
+        },
+        else => return err,
+    };
+
+    try ctx.out.print("created {s}\n", .{main_file});
 }
 
 fn initGit(ctx: Context) !void {
