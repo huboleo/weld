@@ -17,11 +17,11 @@ pub fn run(ctx: Context, args: []const [:0]const u8) !void {
         return;
     };
 
-    try createSrcDir(ctx);
+    try createDir(ctx, "src");
 
     switch (options.project_type) {
         .library => {
-            try createIncludeDir(ctx);
+            try createDir(ctx, "include");
         },
         .executable => {
             try writeMainFile(ctx, options.language);
@@ -55,19 +55,13 @@ fn parseOptions(args: []const [:0]const u8) ?Options {
     return options;
 }
 
-fn createSrcDir(ctx: Context) !void {
-    const status = try ctx.cwd.createDirPathStatus(ctx.io, "src", .default_dir);
+/// Creates the directory at `path`, including any missing parent directories. An existing
+/// directory is fine. Prints what happened.
+fn createDir(ctx: Context, path: []const u8) !void {
+    const status = try ctx.cwd.createDirPathStatus(ctx.io, path, .default_dir);
     switch (status) {
-        .created => try ctx.out.print("created /src directory\n", .{}),
-        .existed => try ctx.out.print("src/ already exists\n", .{}),
-    }
-}
-
-fn createIncludeDir(ctx: Context) !void {
-    const status = try ctx.cwd.createDirPathStatus(ctx.io, "include", .default_dir);
-    switch (status) {
-        .created => try ctx.out.print("created include/\n", .{}),
-        .existed => try ctx.out.print("include/ already exists\n", .{}),
+        .created => try ctx.out.print("created {s}/\n", .{path}),
+        .existed => try ctx.out.print("{s}/ already exists\n", .{path}),
     }
 }
 
@@ -181,17 +175,21 @@ test "parseOptions: invalid arguments give null" {
     try testing.expect(parseOptions(&.{ "--lib", "c" }) == null);
 }
 
-test "createSrcDir: creates src/ and accepts an existing one" {
+test "createDir: creates nested directories and accepts existing ones" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
     var output: std.Io.Writer.Allocating = .init(testing.allocator);
     defer output.deinit();
     const ctx = testContext(tmp.dir, &output.writer);
 
-    try createSrcDir(ctx);
-    try createSrcDir(ctx);
+    try createDir(ctx, "include/mylib");
+    try createDir(ctx, "include/mylib");
 
-    try tmp.dir.access(testing.io, "src", .{});
+    try tmp.dir.access(testing.io, "include/mylib", .{});
+    try testing.expectEqualStrings(
+        "created include/mylib/\ninclude/mylib/ already exists\n",
+        output.written(),
+    );
 }
 
 test "writeBuildScript: writes the template for the language and project type" {
