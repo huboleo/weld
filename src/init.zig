@@ -3,8 +3,12 @@ const Context = @import("cli.zig").Context;
 
 const Language = enum { c, @"c++" };
 
+const ProjectType = enum { executable, library };
+
 const Options = struct {
     language: Language,
+    project_type: ProjectType = .executable,
+    git: bool = true,
 };
 
 pub fn run(ctx: Context, args: []const [:0]const u8) !void {
@@ -14,16 +18,31 @@ pub fn run(ctx: Context, args: []const [:0]const u8) !void {
     };
 
     try createSrcDir(ctx);
-    try writeBuildScript(ctx, options.language);
-    try initGit(ctx);
+    try writeBuildScript(ctx, options.language, options.project_type);
+
+    if (options.git) {
+        try initGit(ctx);
+    }
 }
 
 fn parseOptions(args: []const [:0]const u8) ?Options {
-    if (args.len != 1) return null;
+    if (args.len == 0) return null;
 
     const language = std.meta.stringToEnum(Language, args[0]) orelse return null;
 
-    return .{ .language = language };
+    var options: Options = .{ .language = language };
+
+    for (args[1..]) |arg| {
+        if (std.mem.eql(u8, arg, "--lib")) {
+            options.project_type = .library;
+        } else if (std.mem.eql(u8, arg, "--no-git")) {
+            options.git = false;
+        } else {
+            return null;
+        }
+    }
+
+    return options;
 }
 
 fn createSrcDir(ctx: Context) !void {
@@ -34,15 +53,21 @@ fn createSrcDir(ctx: Context) !void {
     }
 }
 
-fn writeBuildScript(ctx: Context, language: Language) !void {
+fn writeBuildScript(ctx: Context, language: Language, project_type: ProjectType) !void {
     const build_file: []const u8 = switch (language) {
         .c => "build.c",
         .@"c++" => "build.cpp",
     };
 
     const template: []const u8 = switch (language) {
-        .c => build_c_template,
-        .@"c++" => build_cpp_template,
+        .c => switch (project_type) {
+            .executable => build_c_exec_template,
+            .library => build_c_lib_template,
+        },
+        .@"c++" => switch (project_type) {
+            .executable => build_cpp_exec_template,
+            .library => build_cpp_lib_template,
+        },
     };
 
     ctx.cwd.writeFile(ctx.io, .{
@@ -96,12 +121,22 @@ const gitignore_template =
     \\
 ;
 
-const build_c_template =
+const build_c_exec_template =
     \\// weld build script (C). Placeholder until weld.h exists.
     \\
 ;
 
-const build_cpp_template =
+const build_cpp_exec_template =
+    \\// weld build script (C++). Placeholder until weld.hpp exists.
+    \\
+;
+
+const build_c_lib_template =
+    \\// weld build script (C). Placeholder until weld.h exists.
+    \\
+;
+
+const build_cpp_lib_template =
     \\// weld build script (C++). Placeholder until weld.hpp exists.
     \\
 ;
