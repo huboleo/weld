@@ -17,6 +17,15 @@ pub fn run(ctx: Context, args: []const [:0]const u8) !void {
         return error.AlreadyReported;
     };
 
+    const other_build_file: []const u8 = switch (options.language) {
+        .c => "build.cpp",
+        .@"c++" => "build.c",
+    };
+    if (try fileExists(ctx, other_build_file)) {
+        try ctx.err.print("{s} already exists, a project can't have both build.c and build.cpp\n", .{other_build_file});
+        return error.AlreadyReported;
+    }
+
     switch (options.project_type) {
         .library => {
             const project_name = resolveProjectName(ctx) catch |err| switch (err) {
@@ -150,18 +159,47 @@ fn writeMainFile(ctx: Context, language: Language) !void {
 }
 
 fn initGit(ctx: Context) !void {
-    const result = try std.process.run(ctx.arena, ctx.io, .{
-        .argv = &.{ "git", "init" },
-    });
+    // Spawning a program that isn't on PATH fails with FileNotFound.
+    const inside_repo = isInsideGitRepo(ctx) catch |err| switch (err) {
+        error.FileNotFound => {
+            try ctx.err.print("git not found, skipping git init\n", .{});
+            return;
+        },
+        else => return err,
+    };
 
-    if (!result.term.success()) {
-        try ctx.err.print("git init failed: {s}", .{result.stderr});
-        return error.AlreadyReported;
+    if (inside_repo) {
+        try ctx.out.print("already inside a git repository, skipping git init\n", .{});
+    } else {
+        const result = try std.process.run(ctx.arena, ctx.io, .{
+            .argv = &.{ "git", "init" },
+        });
+
+        if (!result.term.success()) {
+            try ctx.err.print("git init failed: {s}", .{result.stderr});
+            return error.AlreadyReported;
+        }
+
+        try ctx.out.print("initialized git repository\n", .{});
     }
 
-    try ctx.out.print("initialized git repository\n", .{});
-
     try writeGitignore(ctx);
+}
+
+/// `git rev-parse` succeeds only inside an existing work tree; outside one it exits with 128.
+fn isInsideGitRepo(ctx: Context) !bool {
+    const result = try std.process.run(ctx.arena, ctx.io, .{
+        .argv = &.{ "git", "rev-parse", "--is-inside-work-tree" },
+    });
+    return result.term.success();
+}
+
+fn fileExists(ctx: Context, path: []const u8) !bool {
+    ctx.cwd.access(ctx.io, path, .{}) catch |err| switch (err) {
+        error.FileNotFound => return false,
+        else => return err,
+    };
+    return true;
 }
 
 fn writeGitignore(ctx: Context) !void {
@@ -426,4 +464,20 @@ test "run: a library name starting with a digit creates nothing" {
     try testing.expectEqualStrings("project name '2048-game' can't start with a digit\n", output.written());
     try testing.expectError(error.FileNotFound, project_dir.access(testing.io, "src", .{}));
     try testing.expectError(error.FileNotFound, project_dir.access(testing.io, "build.c", .{}));
+}
+
+test "run: an existing build script for the other language creates nothing" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "build.cpp", .data = "" });
+
+    var output: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer output.deinit();
+    const ctx = testContext(tmp.dir, &output.writer);
+
+    try testing.expectError(error.AlreadyReported, run(ctx, &.{ "c", "--no-git" }));
+
+    try testing.expectEqualStrings("build.cpp already exists, a project can't have both build.c and build.cpp\n", output.written());
+    try testing.expectError(error.FileNotFound, tmp.dir.access(testing.io, "src", .{}));
+    try testing.expectError(error.FileNotFound, tmp.dir.access(testing.io, "build.c", .{}));
 }
