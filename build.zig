@@ -4,6 +4,10 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const description = b.createModule(.{
+        .root_source_file = b.path("shared/description.zig"),
+    });
+
     const exe = b.addExecutable(.{
         .name = "weld",
         .root_module = b.createModule(.{
@@ -14,6 +18,20 @@ pub fn build(b: *std.Build) void {
     });
 
     b.installArtifact(exe);
+
+    const runtime = b.addLibrary(.{
+        .name = "weld_runtime",
+        .linkage = .static,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("runtime/runtime.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        }),
+    });
+    runtime.root_module.addImport("description", description);
+
+    b.installArtifact(runtime);
 
     const run_step = b.step("run", "Run the app");
 
