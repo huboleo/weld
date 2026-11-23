@@ -55,6 +55,29 @@ fn main(argc: c_int, argv: [*][*:0]u8) callconv(.c) c_int {
     return 0;
 }
 
+fn copyStrings(arena: std.mem.Allocator, list: WeldStrings, origin: Origin) ![]const []const u8 {
+    const items = list.items orelse return &.{};
+
+    const copy = try arena.alloc([]const u8, list.count);
+    for (items[0..list.count], copy, 0..) |item, *slot, i| {
+        const ptr = item orelse fail("{s}(\"{s}\"): {s}[{d}] is NULL", .{ origin.function, origin.target, origin.field, i });
+        slot.* = try arena.dupe(u8, std.mem.span(ptr));
+    }
+
+    return copy;
+}
+
+const Origin = struct {
+    function: []const u8,
+    target: []const u8,
+    field: []const u8,
+};
+
+fn fail(comptime format: []const u8, args: anytype) noreturn {
+    std.debug.print(format, args);
+    std.process.exit(1);
+}
+
 /// Fails when mirrored types in zig and original translated from
 /// build.h differ in size, number of fields, or the offset of any field.
 /// A field missing from Original is a compile error.
