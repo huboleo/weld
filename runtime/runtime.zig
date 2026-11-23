@@ -55,6 +55,9 @@ fn main(argc: c_int, argv: [*][*:0]u8) callconv(.c) c_int {
     return 0;
 }
 
+/// Copies a C list of strings into the arena, so nothing points into the
+/// script's memory after the call. A null list gives an empty slice; a NULL
+/// entry ends the script with an error message.
 fn copyStrings(arena: std.mem.Allocator, list: WeldStrings, origin: Origin) ![]const []const u8 {
     const items = list.items orelse return &.{};
 
@@ -67,14 +70,18 @@ fn copyStrings(arena: std.mem.Allocator, list: WeldStrings, origin: Origin) ![]c
     return copy;
 }
 
+/// Where a list came from, for error messages:
+/// `weld_add_executable("app"): sources[1] is NULL`.
 const Origin = struct {
     function: []const u8,
     target: []const u8,
     field: []const u8,
 };
 
+/// For mistakes in the build script: prints the message to stderr and exits
+/// with code 1. weld shows the script's stderr to the user.
 fn fail(comptime format: []const u8, args: anytype) noreturn {
-    std.debug.print(format, args);
+    std.debug.print(format ++ "\n", args);
     std.process.exit(1);
 }
 
