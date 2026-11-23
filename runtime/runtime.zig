@@ -57,6 +57,10 @@ fn main(argc: c_int, argv: [*][*:0]u8) callconv(.c) c_int {
 
     build(&b);
 
+    for (b.targets.items) |t| {
+        std.debug.print("{t} {s} {d}\n", .{ t.kind, t.name, t.sources.len });
+    }
+
     return 0;
 }
 
