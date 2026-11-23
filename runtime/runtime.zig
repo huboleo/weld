@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const description = @import("description");
 
 // Mirrors of the structs in include/weld/build.h. `extern struct` gives them
 // the C layout, so the field order and types must match the header exactly.
@@ -27,6 +28,9 @@ const LibraryOptions = extern struct {
 
 const Build = struct {
     arena: std.mem.Allocator,
+    /// Name for targets that leave .name out. Placeholder until weld passes it in argv.
+    default_name: []const u8,
+    targets: std.ArrayList(*description.Target) = .empty,
 };
 
 extern fn build(b: *Build) void;
@@ -44,7 +48,7 @@ fn main(argc: c_int, argv: [*][*:0]u8) callconv(.c) c_int {
     defer arena.deinit();
 
     const allocator = arena.allocator();
-    var b: Build = .{ .arena = allocator };
+    var b: Build = .{ .arena = allocator, .default_name = "app" };
 
     build(&b);
 
