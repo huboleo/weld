@@ -26,6 +26,11 @@ const LibraryOptions = extern struct {
     includes: WeldStrings,
 };
 
+const Options = union(description.Target.Kind) {
+    executable: ExecutableOptions,
+    library: LibraryOptions,
+};
+
 const Build = struct {
     arena: std.mem.Allocator,
     /// Name for targets that leave .name out. Placeholder until weld passes it in argv.
@@ -53,6 +58,37 @@ fn main(argc: c_int, argv: [*][*:0]u8) callconv(.c) c_int {
     build(&b);
 
     return 0;
+}
+
+fn addTarget(b: *Build, options: Options) !*description.Target {
+    switch (options) {
+        // Compiled once per kind: o is that kind's options struct, kind is known at compile time.
+        inline else => |o, kind| {
+            const function = "weld_add_" ++ @tagName(kind);
+
+            const name = if (o.name) |n| try b.arena.dupe(u8, std.mem.span(n)) else b.default_name;
+
+            var sources = try copyStrings(b.arena, o.sources, .{ .function = function, .target = name, .field = "sources" });
+            if (sources.len == 0) sources = &.{"src/"};
+
+            const includes = try copyStrings(b.arena, o.includes, .{ .function = function, .target = name, .field = "includes" });
+
+            const target = try b.arena.create(description.Target);
+            target.* = .{ .kind = kind, .name = name, .sources = sources, .includes = includes };
+            try b.targets.append(b.arena, target);
+            return target;
+        },
+    }
+}
+
+export fn weld_add_executable(b: *Build, options: ?*const ExecutableOptions) *description.Target {
+    const o = options orelse fail("weld_add_executable: options is NULL", .{});
+    return addTarget(b, .{ .executable = o.* }) catch @panic("out of memory");
+}
+
+export fn weld_add_library(b: *Build, options: ?*const LibraryOptions) *description.Target {
+    const o = options orelse fail("weld_add_library: options is NULL", .{});
+    return addTarget(b, .{ .library = o.* }) catch @panic("out of memory");
 }
 
 /// Copies a C list of strings into the arena, so nothing points into the
