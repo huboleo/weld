@@ -18,6 +18,15 @@ const runtime_lib_path = runtime_lib_dir ++ "/libweld_runtime.a";
 const runner_path = "weld-out/build-runner" ++ builtin.target.exeFileExt();
 const description_path = "weld-out/description.json";
 
+/// Runs the project's build script and returns what it declared.
+pub fn describe(ctx: Context) !Description {
+    const language = try findScript(ctx);
+    try writeRuntime(ctx);
+    try compileRunner(ctx, language);
+    try runRunner(ctx);
+    return readDescription(ctx);
+}
+
 /// Writes the embedded runtime and its header into the project, where the
 /// compiler can read them.
 fn writeRuntime(ctx: Context) !void {
@@ -335,4 +344,36 @@ test "readDescription: a missing version doesn't parse" {
     try tmp.dir.writeFile(testing.io, .{ .sub_path = description_path, .data = "{\"targets\":[]}" });
 
     try testing.expectError(error.MissingField, readDescription(ctx));
+}
+
+test "describe: runs the build script and returns its targets" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var output: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer output.deinit();
+    var ctx = testContext(tmp.dir, &output.writer);
+    ctx.arena = arena.allocator();
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "build.c", .data = @embedFile("templates/build_exe.c") });
+
+    const desc = try describe(ctx);
+
+    try testing.expectEqual(1, desc.targets.len);
+    try testing.expectEqual(.executable, desc.targets[0].kind);
+    try testing.expectEqualStrings("app", desc.targets[0].name);
+}
+
+test "describe: a directory without a build script writes nothing" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var output: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer output.deinit();
+    var ctx = testContext(tmp.dir, &output.writer);
+    ctx.arena = arena.allocator();
+
+    try testing.expectError(error.AlreadyReported, describe(ctx));
+    try testing.expect(!try context.fileExists(ctx, "weld-out"));
 }
