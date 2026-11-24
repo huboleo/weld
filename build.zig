@@ -31,6 +31,8 @@ pub fn build(b: *std.Build) void {
     });
     runtime.root_module.addImport("description", description);
 
+    exe.root_module.addImport("description", description);
+
     // build.h as Zig declarations, so the runtime's tests can compare the
     // runtime's hand-written mirrors against the real C structs.
     const build_h = b.addTranslateC(.{

@@ -6,7 +6,9 @@
 pub const current_version: u32 = 1;
 
 pub const Description = struct {
-    version: u32 = current_version,
+    /// No default on purpose: a file without it fails to parse instead of
+    /// silently counting as the current version.
+    version: u32,
     targets: []const Target,
 };
 

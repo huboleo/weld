@@ -1,8 +1,10 @@
 const std = @import("std");
 const context = @import("context.zig");
 const builtin = @import("builtin");
+const description = @import("description");
 const Context = context.Context;
 const Language = context.Language;
+const Description = description.Description;
 
 const runtime_lib = @embedFile("libweld_runtime.a");
 const build_h = @embedFile("weld/build.h");
@@ -73,6 +75,18 @@ fn runRunner(ctx: Context) !void {
             return error.AlreadyReported;
         },
     }
+}
+
+/// Reads back the description the build runner wrote, and checks that it uses the current version.
+fn readDescription(ctx: Context) !Description {
+    const bytes = try ctx.cwd.readFileAlloc(ctx.io, description_path, ctx.arena, .unlimited);
+    const desc = try std.json.parseFromSliceLeaky(Description, ctx.arena, bytes, .{});
+    if (desc.version != description.current_version) {
+        try ctx.err.print("{s} has version {d}, expected {d}\n", .{ description_path, desc.version, description.current_version });
+        return error.AlreadyReported;
+    }
+
+    return desc;
 }
 
 /// Returns the language of the project's build script, or an error if build scripts exist in both languages or none
@@ -266,4 +280,59 @@ test "runRunner: a script that crashes is reported" {
 
     try testing.expectError(error.AlreadyReported, runRunner(ctx));
     try testing.expect(std.mem.indexOf(u8, output.written(), "build script crashed") != null);
+}
+
+test "readDescription: reads back what the build runner wrote" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var output: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer output.deinit();
+    var ctx = testContext(tmp.dir, &output.writer);
+    ctx.arena = arena.allocator();
+    try prepareRunner(ctx, @embedFile("templates/build_lib.c"));
+    try runRunner(ctx);
+
+    const desc = try readDescription(ctx);
+
+    try testing.expectEqual(1, desc.targets.len);
+    const target = desc.targets[0];
+    try testing.expectEqual(.library, target.kind);
+    try testing.expectEqualStrings("app", target.name);
+    try testing.expectEqual(1, target.sources.len);
+    try testing.expectEqualStrings("src/", target.sources[0]);
+    try testing.expectEqual(1, target.includes.len);
+    try testing.expectEqualStrings("include/", target.includes[0]);
+}
+
+test "readDescription: a different version is reported" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var output: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer output.deinit();
+    var ctx = testContext(tmp.dir, &output.writer);
+    ctx.arena = arena.allocator();
+    try tmp.dir.createDirPath(testing.io, "weld-out");
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = description_path, .data = "{\"version\":0,\"targets\":[]}" });
+
+    try testing.expectError(error.AlreadyReported, readDescription(ctx));
+    try testing.expectEqualStrings("weld-out/description.json has version 0, expected 1\n", output.written());
+}
+
+test "readDescription: a missing version doesn't parse" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var output: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer output.deinit();
+    var ctx = testContext(tmp.dir, &output.writer);
+    ctx.arena = arena.allocator();
+    try tmp.dir.createDirPath(testing.io, "weld-out");
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = description_path, .data = "{\"targets\":[]}" });
+
+    try testing.expectError(error.MissingField, readDescription(ctx));
 }

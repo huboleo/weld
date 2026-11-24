@@ -86,7 +86,7 @@ fn main(argc: c_int, argv: [*][*:0]u8) callconv(.c) c_int {
         slot.* = t.*;
     }
 
-    const bytes = std.json.Stringify.valueAlloc(b.arena, description.Description{ .targets = targets }, .{}) catch @panic("out of memory");
+    const bytes = std.json.Stringify.valueAlloc(b.arena, description.Description{ .version = description.current_version, .targets = targets }, .{}) catch @panic("out of memory");
 
     var threaded: std.Io.Threaded = .init_single_threaded;
     const io = threaded.io();
