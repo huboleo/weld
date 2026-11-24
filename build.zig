@@ -42,6 +42,11 @@ pub fn build(b: *std.Build) void {
 
     b.installArtifact(runtime);
 
+    // weld never calls the runtime itself: it writes these two files to disk and
+    // links each project's build script against them into the build runner.
+    exe.root_module.addAnonymousImport("libweld_runtime.a", .{ .root_source_file = runtime.getEmittedBin() });
+    exe.root_module.addAnonymousImport("weld/build.h", .{ .root_source_file = b.path("include/weld/build.h") });
+
     const run_step = b.step("run", "Run the app");
 
     const run_cmd = b.addRunArtifact(exe);
