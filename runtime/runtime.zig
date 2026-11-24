@@ -46,8 +46,31 @@ comptime {
 }
 
 fn main(argc: c_int, argv: [*][*:0]u8) callconv(.c) c_int {
-    _ = argc;
-    _ = argv;
+    const args = argv[0..@intCast(argc)];
+
+    var path: ?[:0]u8 = null;
+    var i: usize = 1;
+
+    while (i < args.len) {
+        const arg = std.mem.span(args[i]);
+        if (std.mem.eql(u8, arg, "--out")) {
+            if (i + 1 == args.len) {
+                std.debug.print("--out needs a path\n", .{});
+                return 1;
+            }
+
+            path = std.mem.span(args[i + 1]);
+            i += 2;
+        } else {
+            std.debug.print("unknown argument: {s}\n", .{arg});
+            return 1;
+        }
+    }
+
+    const out = path orelse {
+        std.debug.print("usage: {s} --out <path>\n", .{args[0]});
+        return 1;
+    };
 
     var arena: std.heap.ArenaAllocator = .init(std.heap.page_allocator);
     defer arena.deinit();
@@ -60,6 +83,11 @@ fn main(argc: c_int, argv: [*][*:0]u8) callconv(.c) c_int {
     for (b.targets.items) |t| {
         std.debug.print("{t} {s} {d}\n", .{ t.kind, t.name, t.sources.len });
     }
+
+    const targets = b.arena.alloc(description.Target, b.targets.items.len) catch |err| {
+        std.debug.print("out of memory\n", .{});
+        return 1;
+    };
 
     return 0;
 }
