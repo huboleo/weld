@@ -80,12 +80,22 @@ fn main(argc: c_int, argv: [*][*:0]u8) callconv(.c) c_int {
 
     build(&b);
 
-    for (b.targets.items) |t| {
-        std.debug.print("{t} {s} {d}\n", .{ t.kind, t.name, t.sources.len });
+    const targets = b.arena.alloc(description.Target, b.targets.items.len) catch @panic("out of memory");
+
+    for (b.targets.items, targets) |t, *slot| {
+        slot.* = t.*;
     }
 
-    const targets = b.arena.alloc(description.Target, b.targets.items.len) catch |err| {
-        std.debug.print("out of memory\n", .{});
+    const bytes = std.json.Stringify.valueAlloc(b.arena, description.Description{ .targets = targets }, .{}) catch @panic("out of memory");
+
+    var threaded: std.Io.Threaded = .init_single_threaded;
+    const io = threaded.io();
+
+    std.Io.Dir.cwd().writeFile(io, .{
+        .sub_path = out,
+        .data = bytes,
+    }) catch |err| {
+        std.debug.print("cannot write {s}: {t}\n", .{ out, err });
         return 1;
     };
 
