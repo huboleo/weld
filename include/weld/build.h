@@ -2,6 +2,10 @@
 
 #include <stddef.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef struct {
     const char* const* items;
     size_t count;
@@ -34,3 +38,7 @@ weld_executable* weld_add_executable(weld_build* b, const weld_executable_option
 weld_library* weld_add_library(weld_build* b, const weld_library_options* options);
 
 void build(weld_build* b);
+
+#ifdef __cplusplus
+}
+#endif

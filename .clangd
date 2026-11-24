@@ -1,0 +1,17 @@
+# clangd settings for working on weld itself. The include path is in
+# compile_flags.txt, whose relative paths resolve from the repo root (here they
+# would resolve from each file's own folder). The standard is set here, because
+# C and C++ files need different ones.
+
+# build.h has to stay valid C99: WELD_LIST relies on C99 compound literals.
+If:
+  PathMatch: .*\.(c|h)
+CompileFlags:
+  Add: [-std=c99]
+
+---
+# Build scripts and build.hpp use C++23, the standard weld compiles them with.
+If:
+  PathMatch: .*\.(cpp|hpp)
+CompileFlags:
+  Add: [-std=c++23]
