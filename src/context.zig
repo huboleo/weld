@@ -25,6 +25,14 @@ pub fn fileExists(ctx: Context, path: []const u8) !bool {
     return true;
 }
 
+/// The working directory for child processes: the same as `ctx.cwd`.
+/// `Io.Dir.cwd()` isn't a real handle (on POSIX it's the special value
+/// AT_FDCWD), and passing it as `.dir` makes spawning panic with BADF, so it
+/// becomes `.inherit` instead.
+pub fn childCwd(ctx: Context) std.process.Child.Cwd {
+    return if (ctx.cwd.handle == Io.Dir.cwd().handle) .inherit else .{ .dir = ctx.cwd };
+}
+
 /// A Context for tests: files go to `dir`, and both output streams to `writer`.
 pub fn testContext(dir: Io.Dir, writer: *Io.Writer) Context {
     return .{

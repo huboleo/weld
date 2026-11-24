@@ -1,7 +1,9 @@
 const std = @import("std");
-const Context = @import("context.zig").Context;
-const Language = @import("context.zig").Language;
-const fileExists = @import("context.zig").fileExists;
+const context = @import("context.zig");
+const Context = context.Context;
+const Language = context.Language;
+const fileExists = context.fileExists;
+const childCwd = context.childCwd;
 
 const ProjectType = enum { executable, library };
 
@@ -173,6 +175,7 @@ fn initGit(ctx: Context) !void {
     } else {
         const result = try std.process.run(ctx.arena, ctx.io, .{
             .argv = &.{ "git", "init" },
+            .cwd = childCwd(ctx),
         });
 
         if (!result.term.success()) {
@@ -190,6 +193,7 @@ fn initGit(ctx: Context) !void {
 fn isInsideGitRepo(ctx: Context) !bool {
     const result = try std.process.run(ctx.arena, ctx.io, .{
         .argv = &.{ "git", "rev-parse", "--is-inside-work-tree" },
+        .cwd = childCwd(ctx),
     });
     return result.term.success();
 }
@@ -258,7 +262,7 @@ fn fillTemplate(allocator: std.mem.Allocator, template: []const u8, name: []cons
 
 const testing = std.testing;
 
-const testContext = @import("context.zig").testContext;
+const testContext = context.testContext;
 
 test "parseOptions: language only gives the defaults" {
     const options = parseOptions(&.{"c"}).?;

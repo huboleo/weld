@@ -1,5 +1,6 @@
 const std = @import("std");
 const context = @import("context.zig");
+const builtin = @import("builtin");
 const Context = context.Context;
 const Language = context.Language;
 
@@ -12,6 +13,7 @@ const runtime_header_dir = runtime_include_dir ++ "/weld"; // so <weld/build.h> 
 const runtime_header_path = runtime_header_dir ++ "/build.h";
 const runtime_lib_dir = "weld-out/runtime/lib";
 const runtime_lib_path = runtime_lib_dir ++ "/libweld_runtime.a";
+const runner_path = "weld-out/build-runner" ++ builtin.target.exeFileExt();
 
 /// Writes the embedded runtime and its header into the project, where the
 /// compiler can read them.
@@ -21,6 +23,32 @@ fn writeRuntime(ctx: Context) !void {
 
     try ctx.cwd.createDirPath(ctx.io, runtime_lib_dir);
     try ctx.cwd.writeFile(ctx.io, .{ .sub_path = runtime_lib_path, .data = runtime_lib });
+}
+
+/// Compiles the project's build script and links it with the runtime (written by writeRuntime) into the build runner.
+/// Compiler errors are shown to the user unchanged.
+fn compileRunner(ctx: Context, language: Language) !void {
+    const argv: []const []const u8 = switch (language) {
+        .c => &.{ "zig", "cc", "-I", runtime_include_dir, "build.c", runtime_lib_path, "-o", runner_path },
+        // Needs build.hpp and weld's bridge.cpp, which don't exist yet. Once they do
+        // (with writeRuntime also writing runtime_bridge_path), this becomes:
+        // .@"c++" => &.{ "zig", "c++", "-I", runtime_include_dir, "build.cpp", runtime_bridge_path, runtime_lib_path, "-o", runner_path },
+        .@"c++" => {
+            try ctx.err.print("build.cpp is not supported yet\n", .{});
+            return error.AlreadyReported;
+        },
+    };
+
+    const result = try std.process.run(ctx.arena, ctx.io, .{
+        .argv = argv,
+        .cwd = context.childCwd(ctx),
+    });
+
+    if (!result.term.success()) {
+        try ctx.err.print("the build script failed to compile:\n", .{});
+        try ctx.err.print("{s}", .{result.stderr});
+        return error.AlreadyReported;
+    }
 }
 
 /// Returns the language of the project's build script, or an error if build scripts exist in both languages or none
@@ -116,4 +144,41 @@ test "findScript: no script is an error" {
 
     try testing.expectError(error.AlreadyReported, findScript(ctx));
     try testing.expectEqualStrings("no build.c or build.cpp found\n", output.written());
+}
+
+test "compileRunner: links a build script with the runtime" {
+    // std.process.run allocates the child's output from ctx.arena, so the
+    // tests give it a real arena instead of the leak-checking allocator.
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var output: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer output.deinit();
+    var ctx = testContext(tmp.dir, &output.writer);
+    ctx.arena = arena.allocator();
+
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "build.c", .data = @embedFile("templates/build_exe.c") });
+    try writeRuntime(ctx);
+
+    try compileRunner(ctx, .c);
+
+    try testing.expect(try context.fileExists(ctx, runner_path));
+}
+
+test "compileRunner: a script that doesn't compile shows the compiler's errors" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var output: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer output.deinit();
+    var ctx = testContext(tmp.dir, &output.writer);
+    ctx.arena = arena.allocator();
+
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "build.c", .data = "void build(weld_build* b) { oops }" });
+    try writeRuntime(ctx);
+
+    try testing.expectError(error.AlreadyReported, compileRunner(ctx, .c));
+    try testing.expect(std.mem.indexOf(u8, output.written(), "error:") != null);
 }
