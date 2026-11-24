@@ -2,6 +2,7 @@ const std = @import("std");
 const Io = std.Io;
 
 const cli = @import("cli.zig");
+const Context = @import("context.zig").Context;
 
 pub fn main(init: std.process.Init) !u8 {
     const args = try init.minimal.args.toSlice(init.arena.allocator());
@@ -11,7 +12,7 @@ pub fn main(init: std.process.Init) !u8 {
     var stdout_file_writer: Io.File.Writer = .initStreaming(.stdout(), io, &stdout_buffer);
     var stderr_file_writer: Io.File.Writer = .initStreaming(.stderr(), io, &.{});
 
-    const ctx: cli.Context = .{
+    const ctx: Context = .{
         .io = io,
         .arena = init.arena.allocator(),
         .cwd = Io.Dir.cwd(),

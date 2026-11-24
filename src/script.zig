@@ -1,5 +1,5 @@
 const std = @import("std");
-const Context = @import("cli.zig").Context;
+const Context = @import("context.zig").Context;
 
 const runtime_lib = @embedFile("libweld_runtime.a");
 const build_h = @embedFile("weld/build.h");
@@ -24,7 +24,7 @@ fn writeRuntime(ctx: Context) !void {
 // ---------------------------------------------------------------- tests
 
 const testing = std.testing;
-const testContext = @import("cli.zig").testContext;
+const testContext = @import("context.zig").testContext;
 
 test "writeRuntime: writes the header and the library where the compiler expects them" {
     var tmp = testing.tmpDir(.{});

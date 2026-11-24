@@ -1,25 +1,6 @@
 const std = @import("std");
-const Io = std.Io;
 const init = @import("init.zig");
-
-pub const Context = struct {
-    io: Io,
-    arena: std.mem.Allocator,
-    cwd: Io.Dir,
-    out: *Io.Writer,
-    err: *Io.Writer,
-};
-
-/// A Context for tests: files go to `dir`, and both output streams to `writer`.
-pub fn testContext(dir: Io.Dir, writer: *Io.Writer) Context {
-    return .{
-        .io = std.testing.io,
-        .arena = std.testing.allocator,
-        .cwd = dir,
-        .out = writer,
-        .err = writer,
-    };
-}
+const Context = @import("context.zig").Context;
 
 pub const CommandType = enum { init, build, run, @"test", lint, fmt, help };
 

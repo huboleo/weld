@@ -1,7 +1,7 @@
 const std = @import("std");
-const Context = @import("cli.zig").Context;
-
-const Language = enum { c, @"c++" };
+const Context = @import("context.zig").Context;
+const Language = @import("context.zig").Language;
+const fileExists = @import("context.zig").fileExists;
 
 const ProjectType = enum { executable, library };
 
@@ -194,14 +194,6 @@ fn isInsideGitRepo(ctx: Context) !bool {
     return result.term.success();
 }
 
-fn fileExists(ctx: Context, path: []const u8) !bool {
-    ctx.cwd.access(ctx.io, path, .{}) catch |err| switch (err) {
-        error.FileNotFound => return false,
-        else => return err,
-    };
-    return true;
-}
-
 fn writeGitignore(ctx: Context) !void {
     const created = try writeNewFile(ctx, ".gitignore", @embedFile("templates/gitignore"));
     if (!created) {
@@ -266,7 +258,7 @@ fn fillTemplate(allocator: std.mem.Allocator, template: []const u8, name: []cons
 
 const testing = std.testing;
 
-const testContext = @import("cli.zig").testContext;
+const testContext = @import("context.zig").testContext;
 
 test "parseOptions: language only gives the defaults" {
     const options = parseOptions(&.{"c"}).?;
