@@ -14,6 +14,7 @@ const runtime_header_path = runtime_header_dir ++ "/build.h";
 const runtime_lib_dir = "weld-out/runtime/lib";
 const runtime_lib_path = runtime_lib_dir ++ "/libweld_runtime.a";
 const runner_path = "weld-out/build-runner" ++ builtin.target.exeFileExt();
+const description_path = "weld-out/description.json";
 
 /// Writes the embedded runtime and its header into the project, where the
 /// compiler can read them.
@@ -48,6 +49,29 @@ fn compileRunner(ctx: Context, language: Language) !void {
         try ctx.err.print("the build script failed to compile:\n", .{});
         try ctx.err.print("{s}", .{result.stderr});
         return error.AlreadyReported;
+    }
+}
+
+/// Runs the build runner, which writes the description to description_path.
+/// The script's own output goes straight to the user's terminal.
+fn runRunner(ctx: Context) !void {
+    var child = try std.process.spawn(ctx.io, .{
+        .argv = &.{ runner_path, "--out", description_path },
+        .cwd = context.childCwd(ctx),
+    });
+
+    const term = try child.wait(ctx.io);
+
+    switch (term) {
+        .exited => |code| if (code != 0) return error.AlreadyReported,
+        .signal => |sig| {
+            try ctx.err.print("build script crashed ({t})\n", .{sig});
+            return error.AlreadyReported;
+        },
+        else => {
+            try ctx.err.print("build script ended unexpectedly\n", .{});
+            return error.AlreadyReported;
+        },
     }
 }
 
@@ -181,4 +205,65 @@ test "compileRunner: a script that doesn't compile shows the compiler's errors" 
 
     try testing.expectError(error.AlreadyReported, compileRunner(ctx, .c));
     try testing.expect(std.mem.indexOf(u8, output.written(), "error:") != null);
+}
+
+/// Writes `script` as build.c and compiles it into the build runner.
+fn prepareRunner(ctx: Context, script: []const u8) !void {
+    try ctx.cwd.writeFile(ctx.io, .{ .sub_path = "build.c", .data = script });
+    try writeRuntime(ctx);
+    try compileRunner(ctx, .c);
+}
+
+test "runRunner: a working script writes the description" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var output: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer output.deinit();
+    var ctx = testContext(tmp.dir, &output.writer);
+    ctx.arena = arena.allocator();
+    try prepareRunner(ctx, @embedFile("templates/build_exe.c"));
+
+    try runRunner(ctx);
+
+    const json = try tmp.dir.readFileAlloc(testing.io, description_path, arena.allocator(), .unlimited);
+    try testing.expect(std.mem.indexOf(u8, json, "\"kind\":\"executable\"") != null);
+}
+
+test "runRunner: a script that fails is reported" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var output: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer output.deinit();
+    var ctx = testContext(tmp.dir, &output.writer);
+    ctx.arena = arena.allocator();
+    // NULL options: the runtime prints why (to the inherited stderr) and exits with 1.
+    try prepareRunner(ctx,
+        \\#include <weld/build.h>
+        \\void build(weld_build* b) { weld_add_executable(b, 0); }
+    );
+
+    try testing.expectError(error.AlreadyReported, runRunner(ctx));
+}
+
+test "runRunner: a script that crashes is reported" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var output: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer output.deinit();
+    var ctx = testContext(tmp.dir, &output.writer);
+    ctx.arena = arena.allocator();
+    // `volatile` keeps the compiler from optimizing the bad write away.
+    try prepareRunner(ctx,
+        \\#include <weld/build.h>
+        \\void build(weld_build* b) { (void)b; *(volatile int*)0 = 1; }
+    );
+
+    try testing.expectError(error.AlreadyReported, runRunner(ctx));
+    try testing.expect(std.mem.indexOf(u8, output.written(), "build script crashed") != null);
 }
