@@ -20,3 +20,27 @@ fn writeRuntime(ctx: Context) !void {
     try ctx.cwd.createDirPath(ctx.io, runtime_lib_dir);
     try ctx.cwd.writeFile(ctx.io, .{ .sub_path = runtime_lib_path, .data = runtime_lib });
 }
+
+// ---------------------------------------------------------------- tests
+
+const testing = std.testing;
+const testContext = @import("cli.zig").testContext;
+
+test "writeRuntime: writes the header and the library where the compiler expects them" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var output: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer output.deinit();
+    const ctx = testContext(tmp.dir, &output.writer);
+
+    try writeRuntime(ctx);
+
+    const lib = try tmp.dir.readFileAlloc(testing.io, runtime_lib_path, testing.allocator, .unlimited);
+    defer testing.allocator.free(lib);
+    // Every static library (ar archive) starts with this signature.
+    try testing.expect(std.mem.startsWith(u8, lib, "!<arch>\n"));
+
+    const header = try tmp.dir.readFileAlloc(testing.io, runtime_header_path, testing.allocator, .unlimited);
+    defer testing.allocator.free(header);
+    try testing.expectEqualStrings(build_h, header);
+}

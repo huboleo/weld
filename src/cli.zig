@@ -10,6 +10,17 @@ pub const Context = struct {
     err: *Io.Writer,
 };
 
+/// A Context for tests: files go to `dir`, and both output streams to `writer`.
+pub fn testContext(dir: Io.Dir, writer: *Io.Writer) Context {
+    return .{
+        .io = std.testing.io,
+        .arena = std.testing.allocator,
+        .cwd = dir,
+        .out = writer,
+        .err = writer,
+    };
+}
+
 pub const CommandType = enum { init, build, run, @"test", lint, fmt, help };
 
 pub const Command = struct {

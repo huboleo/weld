@@ -266,15 +266,7 @@ fn fillTemplate(allocator: std.mem.Allocator, template: []const u8, name: []cons
 
 const testing = std.testing;
 
-fn testContext(dir: std.Io.Dir, writer: *std.Io.Writer) Context {
-    return .{
-        .io = testing.io,
-        .arena = testing.allocator,
-        .cwd = dir,
-        .out = writer,
-        .err = writer,
-    };
-}
+const testContext = @import("cli.zig").testContext;
 
 test "parseOptions: language only gives the defaults" {
     const options = parseOptions(&.{"c"}).?;
