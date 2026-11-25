@@ -48,6 +48,8 @@ pub fn build(b: *std.Build) void {
     // links each project's build script against them into the build runner.
     exe.root_module.addAnonymousImport("libweld_runtime.a", .{ .root_source_file = runtime.getEmittedBin() });
     exe.root_module.addAnonymousImport("weld/build.h", .{ .root_source_file = b.path("include/weld/build.h") });
+    exe.root_module.addAnonymousImport("weld/build.hpp", .{ .root_source_file = b.path("include/weld/build.hpp") });
+    exe.root_module.addAnonymousImport("bridge.cpp", .{ .root_source_file = b.path("runtime/bridge.cpp") });
 
     const run_step = b.step("run", "Run the app");
 

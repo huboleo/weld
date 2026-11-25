@@ -8,11 +8,15 @@ const Description = description.Description;
 
 const runtime_lib = @embedFile("libweld_runtime.a");
 const build_h = @embedFile("weld/build.h");
+const build_hpp = @embedFile("weld/build.hpp");
+const bridge = @embedFile("bridge.cpp");
 
 // Where the runtime is written, inside the project.
 const runtime_include_dir = "weld-out/runtime/include"; // passed to -I
 const runtime_header_dir = runtime_include_dir ++ "/weld"; // so <weld/build.h> resolves
-const runtime_header_path = runtime_header_dir ++ "/build.h";
+const runtime_c_header_path = runtime_header_dir ++ "/build.h";
+const runtime_cpp_header_path = runtime_header_dir ++ "/build.hpp";
+const runtime_bridge_path = "weld-out/runtime/bridge.cpp";
 const runtime_lib_dir = "weld-out/runtime/lib";
 const runtime_lib_path = runtime_lib_dir ++ "/libweld_runtime.a";
 const runner_path = "weld-out/build-runner" ++ builtin.target.exeFileExt();
@@ -31,10 +35,12 @@ pub fn describe(ctx: Context) !Description {
 /// compiler can read them.
 fn writeRuntime(ctx: Context) !void {
     try ctx.cwd.createDirPath(ctx.io, runtime_header_dir);
-    try ctx.cwd.writeFile(ctx.io, .{ .sub_path = runtime_header_path, .data = build_h });
+    try ctx.cwd.writeFile(ctx.io, .{ .sub_path = runtime_c_header_path, .data = build_h });
+    try ctx.cwd.writeFile(ctx.io, .{ .sub_path = runtime_cpp_header_path, .data = build_hpp });
 
     try ctx.cwd.createDirPath(ctx.io, runtime_lib_dir);
     try ctx.cwd.writeFile(ctx.io, .{ .sub_path = runtime_lib_path, .data = runtime_lib });
+    try ctx.cwd.writeFile(ctx.io, .{ .sub_path = runtime_bridge_path, .data = bridge });
 }
 
 /// Compiles the project's build script and links it with the runtime (written by writeRuntime) into the build runner.
@@ -42,13 +48,7 @@ fn writeRuntime(ctx: Context) !void {
 fn compileRunner(ctx: Context, language: Language) !void {
     const argv: []const []const u8 = switch (language) {
         .c => &.{ "zig", "cc", "-I", runtime_include_dir, "build.c", runtime_lib_path, "-o", runner_path },
-        // Needs build.hpp and weld's bridge.cpp, which don't exist yet. Once they do
-        // (with writeRuntime also writing runtime_bridge_path), this becomes:
-        // .@"c++" => &.{ "zig", "c++", "-I", runtime_include_dir, "build.cpp", runtime_bridge_path, runtime_lib_path, "-o", runner_path },
-        .@"c++" => {
-            try ctx.err.print("build.cpp is not supported yet\n", .{});
-            return error.AlreadyReported;
-        },
+        .@"c++" => &.{ "zig", "c++", "-std=c++23", "-I", runtime_include_dir, "build.cpp", runtime_bridge_path, runtime_lib_path, "-o", runner_path },
     };
 
     const result = try std.process.run(ctx.arena, ctx.io, .{
@@ -125,7 +125,7 @@ fn findScript(ctx: Context) !Language {
 const testing = std.testing;
 const testContext = context.testContext;
 
-test "writeRuntime: writes the header and the library where the compiler expects them" {
+test "writeRuntime: writes every file where the compiler expects it" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
     var output: std.Io.Writer.Allocating = .init(testing.allocator);
@@ -139,9 +139,17 @@ test "writeRuntime: writes the header and the library where the compiler expects
     // Every static library (ar archive) starts with this signature.
     try testing.expect(std.mem.startsWith(u8, lib, "!<arch>\n"));
 
-    const header = try tmp.dir.readFileAlloc(testing.io, runtime_header_path, testing.allocator, .unlimited);
-    defer testing.allocator.free(header);
-    try testing.expectEqualStrings(build_h, header);
+    const c_header = try tmp.dir.readFileAlloc(testing.io, runtime_c_header_path, testing.allocator, .unlimited);
+    defer testing.allocator.free(c_header);
+    try testing.expectEqualStrings(build_h, c_header);
+
+    const cpp_header = try tmp.dir.readFileAlloc(testing.io, runtime_cpp_header_path, testing.allocator, .unlimited);
+    defer testing.allocator.free(cpp_header);
+    try testing.expectEqualStrings(build_hpp, cpp_header);
+
+    const written_bridge = try tmp.dir.readFileAlloc(testing.io, runtime_bridge_path, testing.allocator, .unlimited);
+    defer testing.allocator.free(written_bridge);
+    try testing.expectEqualStrings(bridge, written_bridge);
 }
 
 test "findScript: build.c gives c" {
@@ -227,6 +235,46 @@ test "compileRunner: a script that doesn't compile shows the compiler's errors" 
     try writeRuntime(ctx);
 
     try testing.expectError(error.AlreadyReported, compileRunner(ctx, .c));
+    try testing.expect(std.mem.indexOf(u8, output.written(), "error:") != null);
+}
+
+test "compileRunner: compiles build.cpp as C++23" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var output: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer output.deinit();
+    var ctx = testContext(tmp.dir, &output.writer);
+    ctx.arena = arena.allocator();
+    try tmp.dir.writeFile(testing.io, .{
+        .sub_path = "build.cpp",
+        .data =
+        \\#include <weld/build.hpp>
+        \\static_assert(__cplusplus >= 202302L);
+        \\void build(weld::Build&) {}
+        ,
+    });
+    try writeRuntime(ctx);
+
+    try compileRunner(ctx, .@"c++");
+
+    try testing.expect(try context.fileExists(ctx, runner_path));
+}
+
+test "compileRunner: a C++ script that doesn't compile shows the compiler's errors" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var output: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer output.deinit();
+    var ctx = testContext(tmp.dir, &output.writer);
+    ctx.arena = arena.allocator();
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "build.cpp", .data = "void build(weld::Build& b) { oops }" });
+    try writeRuntime(ctx);
+
+    try testing.expectError(error.AlreadyReported, compileRunner(ctx, .@"c++"));
     try testing.expect(std.mem.indexOf(u8, output.written(), "error:") != null);
 }
 
@@ -362,6 +410,52 @@ test "describe: runs the build script and returns its targets" {
     try testing.expectEqual(1, desc.targets.len);
     try testing.expectEqual(.executable, desc.targets[0].kind);
     try testing.expectEqualStrings("app", desc.targets[0].name);
+}
+
+test "describe: runs a C++ build script and returns its targets" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var output: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer output.deinit();
+    var ctx = testContext(tmp.dir, &output.writer);
+    ctx.arena = arena.allocator();
+    // The executable leaves its options out, so it gets the runtime's defaults.
+    try tmp.dir.writeFile(testing.io, .{
+        .sub_path = "build.cpp",
+        .data =
+        \\#include <weld/build.hpp>
+        \\void build(weld::Build& b) {
+        \\    b.add_executable({});
+        \\    b.add_library({
+        \\        .name = "shapes",
+        \\        .sources = {"lib/", "extra/circle.cpp"},
+        \\        .includes = {"include/"},
+        \\    });
+        \\}
+        ,
+    });
+
+    const desc = try describe(ctx);
+
+    try testing.expectEqual(2, desc.targets.len);
+
+    const executable = desc.targets[0];
+    try testing.expectEqual(.executable, executable.kind);
+    try testing.expectEqualStrings("app", executable.name);
+    try testing.expectEqual(1, executable.sources.len);
+    try testing.expectEqualStrings("src/", executable.sources[0]);
+    try testing.expectEqual(0, executable.includes.len);
+
+    const library = desc.targets[1];
+    try testing.expectEqual(.library, library.kind);
+    try testing.expectEqualStrings("shapes", library.name);
+    try testing.expectEqual(2, library.sources.len);
+    try testing.expectEqualStrings("lib/", library.sources[0]);
+    try testing.expectEqualStrings("extra/circle.cpp", library.sources[1]);
+    try testing.expectEqual(1, library.includes.len);
+    try testing.expectEqualStrings("include/", library.includes[0]);
 }
 
 test "describe: a directory without a build script writes nothing" {
