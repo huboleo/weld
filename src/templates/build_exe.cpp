@@ -1,5 +1,7 @@
 #include <weld/build.hpp>
 
 void build(weld::Build& b) {
-    return;
+    b.add_executable({
+        .sources = {"src/"},
+    });
 }
