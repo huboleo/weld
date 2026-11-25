@@ -17,6 +17,30 @@ pub const Target = struct {
     name: []const u8,
     sources: []const []const u8,
     includes: []const []const u8,
+    c_standard: CStandard,
+    cpp_standard: CppStandard,
 
     pub const Kind = enum { executable, library };
+};
+
+// The names are the values of the compiler's -std flag. The numbers are the ones in build.h, where
+// 0 means that the script didn't choose a standard.
+
+pub const CStandard = enum(c_uint) {
+    c99 = 1,
+    c11,
+    c17,
+    c23,
+    gnu99,
+    gnu11,
+    gnu17,
+    gnu23,
+};
+
+pub const CppStandard = enum(c_uint) {
+    @"c++11" = 1,
+    @"c++14",
+    @"c++17",
+    @"c++20",
+    @"c++23",
 };

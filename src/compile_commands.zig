@@ -44,9 +44,14 @@ pub fn write(ctx: Context, desc: Description) !void {
 fn prepareArguments(ctx: Context, target: Target, file: []const u8) ![]const []const u8 {
     var arguments: std.ArrayList([]const u8) = .empty;
 
-    const compiler: []const u8 = if (std.mem.eql(u8, std.fs.path.extension(file), ".c")) "clang" else "clang++";
+    if (std.mem.eql(u8, std.fs.path.extension(file), ".c")) {
+        try arguments.append(ctx.arena, "clang");
+        try arguments.append(ctx.arena, standardFlag(target.c_standard));
+    } else {
+        try arguments.append(ctx.arena, "clang++");
+        try arguments.append(ctx.arena, standardFlag(target.cpp_standard));
+    }
 
-    try arguments.append(ctx.arena, compiler);
     try arguments.append(ctx.arena, "-c");
     try arguments.append(ctx.arena, file);
 
@@ -58,17 +63,32 @@ fn prepareArguments(ctx: Context, target: Target, file: []const u8) ![]const []c
     return arguments.items;
 }
 
+/// Returns the compiler's flag for a C or C++ standard, e.g. "-std=c++20". `inline else` makes one
+/// case per standard, so every flag is put together at compile time.
+fn standardFlag(standard: anytype) []const u8 {
+    return switch (standard) {
+        inline else => |s| "-std=" ++ @tagName(s),
+    };
+}
+
 // ---------------------------------------------------------------- tests
 
 const testing = std.testing;
 const testContext = context.testContext;
 
 fn testTarget(sources: []const []const u8, includes: []const []const u8) Target {
-    return .{ .kind = .executable, .name = "app", .sources = sources, .includes = includes };
+    return .{
+        .kind = .executable,
+        .name = "app",
+        .sources = sources,
+        .includes = includes,
+        .c_standard = .gnu17,
+        .cpp_standard = .@"c++23",
+    };
 }
 
-/// Checks the arguments `prepareArguments` gives for `file` in a target with these `includes`.
-fn expectArguments(expected: []const []const u8, file: []const u8, includes: []const []const u8) !void {
+/// Checks the arguments `prepareArguments` gives for `file` in `target`.
+fn expectArguments(expected: []const []const u8, target: Target, file: []const u8) !void {
     var arena: std.heap.ArenaAllocator = .init(testing.allocator);
     defer arena.deinit();
     var tmp = testing.tmpDir(.{});
@@ -78,23 +98,38 @@ fn expectArguments(expected: []const []const u8, file: []const u8, includes: []c
     var ctx = testContext(tmp.dir, &output.writer);
     ctx.arena = arena.allocator();
 
-    try testing.expectEqualDeep(expected, try prepareArguments(ctx, testTarget(&.{}, includes), file));
+    try testing.expectEqualDeep(expected, try prepareArguments(ctx, target, file));
 }
 
 test "prepareArguments: C files use clang, C++ files clang++" {
-    try expectArguments(&.{ "clang", "-c", "main.c" }, "main.c", &.{});
-    try expectArguments(&.{ "clang++", "-c", "main.cc" }, "main.cc", &.{});
-    try expectArguments(&.{ "clang++", "-c", "main.cpp" }, "main.cpp", &.{});
-    try expectArguments(&.{ "clang++", "-c", "main.cxx" }, "main.cxx", &.{});
-    try expectArguments(&.{ "clang++", "-c", "main.c++" }, "main.c++", &.{});
+    const target = testTarget(&.{}, &.{});
+
+    try expectArguments(&.{ "clang", "-std=gnu17", "-c", "main.c" }, target, "main.c");
+    try expectArguments(&.{ "clang++", "-std=c++23", "-c", "main.cc" }, target, "main.cc");
+    try expectArguments(&.{ "clang++", "-std=c++23", "-c", "main.cpp" }, target, "main.cpp");
+    try expectArguments(&.{ "clang++", "-std=c++23", "-c", "main.cxx" }, target, "main.cxx");
+    try expectArguments(&.{ "clang++", "-std=c++23", "-c", "main.c++" }, target, "main.c++");
+}
+
+test "prepareArguments: the standards come from the target" {
+    var target = testTarget(&.{}, &.{});
+    target.c_standard = .c11;
+    target.cpp_standard = .@"c++20";
+
+    try expectArguments(&.{ "clang", "-std=c11", "-c", "main.c" }, target, "main.c");
+    try expectArguments(&.{ "clang++", "-std=c++20", "-c", "main.cpp" }, target, "main.cpp");
 }
 
 test "prepareArguments: every include gets its own -I, in order" {
-    try expectArguments(&.{ "clang", "-c", "main.c", "-I", "include/" }, "main.c", &.{"include/"});
     try expectArguments(
-        &.{ "clang", "-c", "main.c", "-I", "include/", "-I", "deps/json/" },
+        &.{ "clang", "-std=gnu17", "-c", "main.c", "-I", "include/" },
+        testTarget(&.{}, &.{"include/"}),
         "main.c",
-        &.{ "include/", "deps/json/" },
+    );
+    try expectArguments(
+        &.{ "clang", "-std=gnu17", "-c", "main.c", "-I", "include/", "-I", "deps/json/" },
+        testTarget(&.{}, &.{ "include/", "deps/json/" }),
+        "main.c",
     );
 }
 
@@ -133,9 +168,9 @@ test "write: one entry for every file of every target" {
     const http_c = "net" ++ std.fs.path.sep_str ++ "http.c";
 
     try testing.expectEqualDeep(@as([]const Entry, &.{
-        .{ .directory = root, .file = main_cpp, .arguments = &.{ "clang++", "-c", main_cpp, "-I", "include/" } },
-        .{ .directory = root, .file = util_c, .arguments = &.{ "clang", "-c", util_c, "-I", "include/" } },
-        .{ .directory = root, .file = http_c, .arguments = &.{ "clang", "-c", http_c } },
+        .{ .directory = root, .file = main_cpp, .arguments = &.{ "clang++", "-std=c++23", "-c", main_cpp, "-I", "include/" } },
+        .{ .directory = root, .file = util_c, .arguments = &.{ "clang", "-std=gnu17", "-c", util_c, "-I", "include/" } },
+        .{ .directory = root, .file = http_c, .arguments = &.{ "clang", "-std=gnu17", "-c", http_c } },
     }), entries);
 }
 

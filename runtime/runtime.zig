@@ -17,6 +17,8 @@ const ExecutableOptions = extern struct {
     name: ?[*:0]const u8,
     sources: WeldStrings,
     includes: WeldStrings,
+    c_standard: c_uint,
+    cpp_standard: c_uint,
 };
 
 /// `weld_library_options`
@@ -24,6 +26,8 @@ const LibraryOptions = extern struct {
     name: ?[*:0]const u8,
     sources: WeldStrings,
     includes: WeldStrings,
+    c_standard: c_uint,
+    cpp_standard: c_uint,
 };
 
 const Options = union(description.Target.Kind) {
@@ -115,8 +119,18 @@ fn addTarget(b: *Build, options: Options) !*description.Target {
 
             const includes = try copyStrings(b.arena, o.includes, .{ .function = function, .target = name, .field = "includes" });
 
+            const c_standard = toStandard(description.CStandard, o.c_standard, .gnu17, .{ .function = function, .target = name, .field = "c_standard" });
+            const cpp_standard = toStandard(description.CppStandard, o.cpp_standard, .@"c++23", .{ .function = function, .target = name, .field = "cpp_standard" });
+
             const target = try b.arena.create(description.Target);
-            target.* = .{ .kind = kind, .name = name, .sources = sources, .includes = includes };
+            target.* = .{
+                .kind = kind,
+                .name = name,
+                .sources = sources,
+                .includes = includes,
+                .c_standard = c_standard,
+                .cpp_standard = cpp_standard,
+            };
             try b.targets.append(b.arena, target);
             return target;
         },
@@ -148,7 +162,17 @@ fn copyStrings(arena: std.mem.Allocator, list: WeldStrings, origin: Origin) ![]c
     return copy;
 }
 
-/// Where a list came from, for error messages:
+/// Turns the number a script passed into a standard. 0 means the script left
+/// the field out and gives `default`; an unknown number ends the script with
+/// an error message.
+fn toStandard(comptime Standard: type, number: c_uint, default: Standard, origin: Origin) Standard {
+    if (number == 0) return default;
+
+    return std.enums.fromInt(Standard, number) orelse
+        fail("{s}(\"{s}\"): {s} has an unknown value {d}", .{ origin.function, origin.target, origin.field, number });
+}
+
+/// Where a value came from, for error messages:
 /// `weld_add_executable("app"): sources[1] is NULL`.
 const Origin = struct {
     function: []const u8,
@@ -181,4 +205,29 @@ test "mirrored types have the same layout as in build.h" {
     try expectSameLayout(WeldStrings, c.weld_strings);
     try expectSameLayout(ExecutableOptions, c.weld_executable_options);
     try expectSameLayout(LibraryOptions, c.weld_library_options);
+}
+
+test "standards have the same numbers as in build.h" {
+    const c = @import("build_h");
+    const CStandard = description.CStandard;
+    const CppStandard = description.CppStandard;
+
+    try std.testing.expectEqual(CStandard.c99, std.enums.fromInt(CStandard, c.WELD_C_99));
+    try std.testing.expectEqual(CStandard.c11, std.enums.fromInt(CStandard, c.WELD_C_11));
+    try std.testing.expectEqual(CStandard.c17, std.enums.fromInt(CStandard, c.WELD_C_17));
+    try std.testing.expectEqual(CStandard.c23, std.enums.fromInt(CStandard, c.WELD_C_23));
+    try std.testing.expectEqual(CStandard.gnu99, std.enums.fromInt(CStandard, c.WELD_C_GNU99));
+    try std.testing.expectEqual(CStandard.gnu11, std.enums.fromInt(CStandard, c.WELD_C_GNU11));
+    try std.testing.expectEqual(CStandard.gnu17, std.enums.fromInt(CStandard, c.WELD_C_GNU17));
+    try std.testing.expectEqual(CStandard.gnu23, std.enums.fromInt(CStandard, c.WELD_C_GNU23));
+
+    try std.testing.expectEqual(CppStandard.@"c++11", std.enums.fromInt(CppStandard, c.WELD_CPP_11));
+    try std.testing.expectEqual(CppStandard.@"c++14", std.enums.fromInt(CppStandard, c.WELD_CPP_14));
+    try std.testing.expectEqual(CppStandard.@"c++17", std.enums.fromInt(CppStandard, c.WELD_CPP_17));
+    try std.testing.expectEqual(CppStandard.@"c++20", std.enums.fromInt(CppStandard, c.WELD_CPP_20));
+    try std.testing.expectEqual(CppStandard.@"c++23", std.enums.fromInt(CppStandard, c.WELD_CPP_23));
+
+    // 0 means "not set", so it must not be a standard.
+    try std.testing.expectEqual(null, std.enums.fromInt(CStandard, 0));
+    try std.testing.expectEqual(null, std.enums.fromInt(CppStandard, 0));
 }

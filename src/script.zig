@@ -410,6 +410,8 @@ test "describe: runs the build script and returns its targets" {
     try testing.expectEqual(1, desc.targets.len);
     try testing.expectEqual(.executable, desc.targets[0].kind);
     try testing.expectEqualStrings("app", desc.targets[0].name);
+    try testing.expectEqual(.gnu17, desc.targets[0].c_standard);
+    try testing.expectEqual(.@"c++23", desc.targets[0].cpp_standard);
 }
 
 test "describe: runs a C++ build script and returns its targets" {
@@ -432,6 +434,8 @@ test "describe: runs a C++ build script and returns its targets" {
         \\        .name = "shapes",
         \\        .sources = {"lib/", "extra/circle.cpp"},
         \\        .includes = {"include/"},
+        \\        .c_standard = weld::CStandard::c11,
+        \\        .cpp_standard = weld::CppStandard::cpp20,
         \\    });
         \\}
         ,
@@ -447,6 +451,8 @@ test "describe: runs a C++ build script and returns its targets" {
     try testing.expectEqual(1, executable.sources.len);
     try testing.expectEqualStrings("src/", executable.sources[0]);
     try testing.expectEqual(0, executable.includes.len);
+    try testing.expectEqual(.gnu17, executable.c_standard);
+    try testing.expectEqual(.@"c++23", executable.cpp_standard);
 
     const library = desc.targets[1];
     try testing.expectEqual(.library, library.kind);
@@ -456,6 +462,8 @@ test "describe: runs a C++ build script and returns its targets" {
     try testing.expectEqualStrings("extra/circle.cpp", library.sources[1]);
     try testing.expectEqual(1, library.includes.len);
     try testing.expectEqualStrings("include/", library.includes[0]);
+    try testing.expectEqual(.c11, library.c_standard);
+    try testing.expectEqual(.@"c++20", library.cpp_standard);
 }
 
 test "describe: a directory without a build script writes nothing" {

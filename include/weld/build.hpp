@@ -6,16 +6,39 @@
 #include <vector>
 
 namespace weld {
+enum class CStandard {
+    c99 = WELD_C_99,
+    c11 = WELD_C_11,
+    c17 = WELD_C_17,
+    c23 = WELD_C_23,
+    gnu99 = WELD_C_GNU99,
+    gnu11 = WELD_C_GNU11,
+    gnu17 = WELD_C_GNU17,
+    gnu23 = WELD_C_GNU23,
+};
+
+enum class CppStandard {
+    cpp11 = WELD_CPP_11,
+    cpp14 = WELD_CPP_14,
+    cpp17 = WELD_CPP_17,
+    cpp20 = WELD_CPP_20,
+    cpp23 = WELD_CPP_23,
+};
+
 struct ExecutableOptions {
     std::string name = {};
     std::vector<std::string> sources = {};
     std::vector<std::string> includes = {};
+    CStandard c_standard = {};
+    CppStandard cpp_standard = {};
 };
 
 struct LibraryOptions {
     std::string name = {};
     std::vector<std::string> sources = {};
     std::vector<std::string> includes = {};
+    CStandard c_standard = {};
+    CppStandard cpp_standard = {};
 };
 
 class Executable {
@@ -76,6 +99,8 @@ class Build {
             .name = internal::c_name(options.name),
             .sources = sources.get(),
             .includes = includes.get(),
+            .c_standard = static_cast<weld_c_standard>(options.c_standard),
+            .cpp_standard = static_cast<weld_cpp_standard>(options.cpp_standard),
         };
         return Executable(weld_add_executable(raw_, &c));
     }
@@ -87,6 +112,8 @@ class Build {
             .name = internal::c_name(options.name),
             .sources = sources.get(),
             .includes = includes.get(),
+            .c_standard = static_cast<weld_c_standard>(options.c_standard),
+            .cpp_standard = static_cast<weld_cpp_standard>(options.cpp_standard),
         };
         return Library(weld_add_library(raw_, &c));
     }

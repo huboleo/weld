@@ -38,12 +38,16 @@ typedef struct {
     const char* name;
     weld_strings sources;
     weld_strings includes;
+    weld_c_standard c_standard;
+    weld_cpp_standard cpp_standard;
 } weld_executable_options;
 
 typedef struct {
     const char* name;
     weld_strings sources;
     weld_strings includes;
+    weld_c_standard c_standard;
+    weld_cpp_standard cpp_standard;
 } weld_library_options;
 
 typedef struct weld_executable weld_executable;

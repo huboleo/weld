@@ -4,5 +4,6 @@ void build(weld::Build& b) {
     b.add_library({
         .sources = {"src/"},
         .includes = {"include/"},
+        .cpp_standard = weld::CppStandard::cpp23,
     });
 }
