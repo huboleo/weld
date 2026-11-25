@@ -36,4 +36,5 @@ test {
     _ = @import("init.zig");
     _ = @import("script.zig");
     _ = @import("paths.zig");
+    _ = @import("compile_commands.zig");
 }
