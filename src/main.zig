@@ -35,4 +35,5 @@ pub fn main(init: std.process.Init) !u8 {
 test {
     _ = @import("init.zig");
     _ = @import("script.zig");
+    _ = @import("paths.zig");
 }
