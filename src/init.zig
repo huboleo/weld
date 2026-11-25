@@ -28,16 +28,16 @@ pub fn run(ctx: Context, args: []const [:0]const u8) !void {
         return error.AlreadyReported;
     }
 
+    const project_name = resolveProjectName(ctx) catch |err| switch (err) {
+        error.EmptyProjectName => {
+            try ctx.err.print("project name can't be empty\n", .{});
+            return error.AlreadyReported;
+        },
+        else => return err,
+    };
+
     switch (options.project_type) {
         .library => {
-            const project_name = resolveProjectName(ctx) catch |err| switch (err) {
-                error.EmptyProjectName => {
-                    try ctx.err.print("project name can't be empty\n", .{});
-                    return error.AlreadyReported;
-                },
-                else => return err,
-            };
-
             const ident = transformNameIntoIdentifier(ctx.arena, project_name) catch |err| switch (err) {
                 error.InvalidIdentifier => {
                     try ctx.err.print("project name '{s}' can't start with a digit\n", .{project_name});
@@ -89,7 +89,7 @@ pub fn run(ctx: Context, args: []const [:0]const u8) !void {
         },
     }
 
-    try writeBuildScript(ctx, options.language, options.project_type);
+    try writeBuildScript(ctx, options.language, options.project_type, project_name);
 
     if (options.git) {
         try initGit(ctx);
@@ -126,7 +126,7 @@ fn createDir(ctx: Context, path: []const u8) !void {
     }
 }
 
-fn writeBuildScript(ctx: Context, language: Language, project_type: ProjectType) !void {
+fn writeBuildScript(ctx: Context, language: Language, project_type: ProjectType, project_name: []const u8) !void {
     const build_file: []const u8 = switch (language) {
         .c => "build.c",
         .@"c++" => "build.cpp",
@@ -143,7 +143,8 @@ fn writeBuildScript(ctx: Context, language: Language, project_type: ProjectType)
         },
     };
 
-    _ = try writeNewFile(ctx, build_file, template);
+    const content = try std.mem.replaceOwned(u8, ctx.arena, template, "WELD_NAME", project_name);
+    _ = try writeNewFile(ctx, build_file, content);
 }
 
 fn writeMainFile(ctx: Context, language: Language) !void {
@@ -302,18 +303,33 @@ test "createDir: creates nested directories and accepts existing ones" {
     );
 }
 
-test "writeBuildScript: writes the template for the language and project type" {
+test "writeBuildScript: writes the template for the language and project type, with the project's name" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
     var output: std.Io.Writer.Allocating = .init(testing.allocator);
     defer output.deinit();
-    const ctx = testContext(tmp.dir, &output.writer);
+    var ctx = testContext(tmp.dir, &output.writer);
+    ctx.arena = arena.allocator();
 
-    try writeBuildScript(ctx, .@"c++", .library);
+    try writeBuildScript(ctx, .@"c++", .library, "shapes");
 
     const content = try tmp.dir.readFileAlloc(testing.io, "build.cpp", testing.allocator, .limited(4096));
     defer testing.allocator.free(content);
-    try testing.expectEqualStrings(@embedFile("templates/build_lib.cpp"), content);
+    try testing.expectEqualStrings(
+        \\#include <weld/build.hpp>
+        \\
+        \\void build(weld::Build& b) {
+        \\    b.add_library({
+        \\        .name = "shapes",
+        \\        .sources = {"src/"},
+        \\        .includes = {"include/"},
+        \\        .cpp_standard = weld::CppStandard::cpp23,
+        \\    });
+        \\}
+        \\
+    , content);
 }
 
 test "writeBuildScript: never overwrites an existing file" {
@@ -321,10 +337,13 @@ test "writeBuildScript: never overwrites an existing file" {
     defer tmp.cleanup();
     var output: std.Io.Writer.Allocating = .init(testing.allocator);
     defer output.deinit();
-    const ctx = testContext(tmp.dir, &output.writer);
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    var ctx = testContext(tmp.dir, &output.writer);
+    ctx.arena = arena.allocator();
 
     try tmp.dir.writeFile(testing.io, .{ .sub_path = "build.c", .data = "mine" });
-    try writeBuildScript(ctx, .c, .executable);
+    try writeBuildScript(ctx, .c, .executable, "shapes");
 
     const content = try tmp.dir.readFileAlloc(testing.io, "build.c", testing.allocator, .limited(4096));
     defer testing.allocator.free(content);

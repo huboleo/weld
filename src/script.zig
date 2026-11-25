@@ -356,7 +356,8 @@ test "readDescription: reads back what the build runner wrote" {
     try testing.expectEqual(1, desc.targets.len);
     const target = desc.targets[0];
     try testing.expectEqual(.library, target.kind);
-    try testing.expectEqualStrings("app", target.name);
+    // The template is used as it is; `weld init` replaces WELD_NAME with the project's name.
+    try testing.expectEqualStrings("WELD_NAME", target.name);
     try testing.expectEqual(1, target.sources.len);
     try testing.expectEqualStrings("src/", target.sources[0]);
     try testing.expectEqual(1, target.includes.len);
@@ -409,7 +410,8 @@ test "describe: runs the build script and returns its targets" {
 
     try testing.expectEqual(1, desc.targets.len);
     try testing.expectEqual(.executable, desc.targets[0].kind);
-    try testing.expectEqualStrings("app", desc.targets[0].name);
+    // The template is used as it is; `weld init` replaces WELD_NAME with the project's name.
+    try testing.expectEqualStrings("WELD_NAME", desc.targets[0].name);
     try testing.expectEqual(.gnu17, desc.targets[0].c_standard);
     try testing.expectEqual(.@"c++23", desc.targets[0].cpp_standard);
 }
