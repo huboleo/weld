@@ -1,6 +1,8 @@
 //! The build description: what a build script declares. The runtime writes it
 //! as JSON, and weld reads it back. Used by runtime/ and src/.
 
+const std = @import("std");
+
 /// Bumped when the shape below changes, so weld can tell that a cached
 /// description came from a different runtime and rerun the script.
 pub const current_version: u32 = 1;
@@ -44,3 +46,48 @@ pub const CppStandard = enum(c_uint) {
     @"c++20",
     @"c++23",
 };
+
+/// Whether `name` can be a target's name: only letters, digits, `_`, `-` and `.`, and no `.` at
+/// the start. Names become paths in weld-out/, so this keeps them out of other directories
+/// (`../foo`, `a/b`) and rules out `.` and `..`.
+pub fn isValidName(name: []const u8) bool {
+    for (name) |character| {
+        if (std.ascii.isAlphanumeric(character)) continue;
+
+        switch (character) {
+            '_', '-', '.' => continue,
+            else => return false,
+        }
+    }
+
+    return !std.mem.startsWith(u8, name, ".");
+}
+
+// ---------------------------------------------------------------- tests
+
+const testing = std.testing;
+
+test "isValidName: letters, digits, _, - and ." {
+    try testing.expect(isValidName("app"));
+    try testing.expect(isValidName("Shapes2"));
+    try testing.expect(isValidName("my_lib-v1.2"));
+    try testing.expect(isValidName("a.")); // a dot is fine after the start
+}
+
+test "isValidName: names that would leave weld-out/" {
+    try testing.expect(!isValidName("../foo"));
+    try testing.expect(!isValidName("a/b"));
+    try testing.expect(!isValidName("a\\b")); // Windows separator
+    try testing.expect(!isValidName("."));
+    try testing.expect(!isValidName(".."));
+}
+
+test "isValidName: a dot at the start is not allowed" {
+    try testing.expect(!isValidName(".hidden"));
+}
+
+test "isValidName: everything else is not allowed" {
+    try testing.expect(!isValidName("my project"));
+    try testing.expect(!isValidName("c:app"));
+    try testing.expect(!isValidName("zażółć")); // only ASCII letters
+}

@@ -72,7 +72,19 @@ pub fn build(b: *std.Build) void {
 
     const run_runtime_tests = b.addRunArtifact(runtime_tests);
 
+    // A module of its own: `description` has no target, it takes the one of whoever imports it.
+    const description_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("shared/description.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+
+    const run_description_tests = b.addRunArtifact(description_tests);
+
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_exe_tests.step);
     test_step.dependOn(&run_runtime_tests.step);
+    test_step.dependOn(&run_description_tests.step);
 }
