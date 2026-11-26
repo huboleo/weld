@@ -339,6 +339,70 @@ test "runRunner: a script that crashes is reported" {
     try testing.expect(std.mem.indexOf(u8, output.written(), "build script crashed") != null);
 }
 
+/// Runs a build script and checks that it fails with exactly `message`. The runner is started
+/// here instead of with runRunner, which passes the script's stderr through to the terminal.
+fn expectScriptError(script: []const u8, message: []const u8) !void {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var output: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer output.deinit();
+    var ctx = testContext(tmp.dir, &output.writer);
+    ctx.arena = arena.allocator();
+    try prepareRunner(ctx, script);
+
+    const result = try std.process.run(ctx.arena, ctx.io, .{
+        .argv = &.{ runner_path, "--out", description_path },
+        .cwd = context.childCwd(ctx),
+    });
+
+    try testing.expect(!result.term.success());
+    try testing.expectEqualStrings(message, result.stderr);
+}
+
+test "runtime: a target without a name is reported" {
+    try expectScriptError(
+        \\#include <weld/build.h>
+        \\void build(weld_build* b) {
+        \\    weld_executable_options o = { .sources = WELD_LIST("src/") };
+        \\    weld_add_executable(b, &o);
+        \\}
+    , "weld_add_executable: name is missing\n");
+}
+
+test "runtime: a name that would leave weld-out/ is reported" {
+    try expectScriptError(
+        \\#include <weld/build.h>
+        \\void build(weld_build* b) {
+        \\    weld_executable_options o = { .name = "../app", .sources = WELD_LIST("src/") };
+        \\    weld_add_executable(b, &o);
+        \\}
+    , "weld_add_executable(\"../app\"): a name may only contain letters, digits, '_', '-' and '.', and can't start with '.'\n");
+}
+
+test "runtime: two targets with the same name are reported, whatever the kind and case" {
+    try expectScriptError(
+        \\#include <weld/build.h>
+        \\void build(weld_build* b) {
+        \\    weld_executable_options app = { .name = "app", .sources = WELD_LIST("src/") };
+        \\    weld_add_executable(b, &app);
+        \\    weld_library_options lib = { .name = "App", .sources = WELD_LIST("lib/") };
+        \\    weld_add_library(b, &lib);
+        \\}
+    , "weld_add_library(\"App\"): a target named \"app\" already exists\n");
+}
+
+test "runtime: a target without sources is reported" {
+    try expectScriptError(
+        \\#include <weld/build.h>
+        \\void build(weld_build* b) {
+        \\    weld_executable_options o = { .name = "app" };
+        \\    weld_add_executable(b, &o);
+        \\}
+    , "weld_add_executable(\"app\"): sources is missing\n");
+}
+
 test "readDescription: reads back what the build runner wrote" {
     var arena: std.heap.ArenaAllocator = .init(testing.allocator);
     defer arena.deinit();
@@ -425,13 +489,13 @@ test "describe: runs a C++ build script and returns its targets" {
     defer output.deinit();
     var ctx = testContext(tmp.dir, &output.writer);
     ctx.arena = arena.allocator();
-    // The executable leaves its options out, so it gets the runtime's defaults.
+    // The executable leaves the standards out, so it gets the runtime's defaults.
     try tmp.dir.writeFile(testing.io, .{
         .sub_path = "build.cpp",
         .data =
         \\#include <weld/build.hpp>
         \\void build(weld::Build& b) {
-        \\    b.add_executable({});
+        \\    b.add_executable({.name = "app", .sources = {"src/"}});
         \\    b.add_library({
         \\        .name = "shapes",
         \\        .sources = {"lib/", "extra/circle.cpp"},

@@ -37,8 +37,6 @@ const Options = union(description.Target.Kind) {
 
 const Build = struct {
     arena: std.mem.Allocator,
-    /// Name for targets that leave .name out. Placeholder until weld passes it in argv.
-    default_name: []const u8,
     targets: std.ArrayList(*description.Target) = .empty,
 };
 
@@ -80,7 +78,7 @@ fn main(argc: c_int, argv: [*][*:0]u8) callconv(.c) c_int {
     defer arena.deinit();
 
     const allocator = arena.allocator();
-    var b: Build = .{ .arena = allocator, .default_name = "app" };
+    var b: Build = .{ .arena = allocator };
 
     build(&b);
 
@@ -112,10 +110,26 @@ fn addTarget(b: *Build, options: Options) !*description.Target {
         inline else => |o, kind| {
             const function = "weld_add_" ++ @tagName(kind);
 
-            const name = if (o.name) |n| try b.arena.dupe(u8, std.mem.span(n)) else b.default_name;
+            const raw_name = std.mem.span(o.name orelse "");
+            if (raw_name.len == 0) {
+                fail("{s}: name is missing", .{function});
+            }
+            if (!description.isValidName(raw_name)) {
+                fail("{s}(\"{s}\"): a name may only contain letters, digits, '_', '-' and '.', and can't start with '.'", .{ function, raw_name });
+            }
 
-            var sources = try copyStrings(b.arena, o.sources, .{ .function = function, .target = name, .field = "sources" });
-            if (sources.len == 0) sources = &.{"src/"};
+            for (b.targets.items) |existing| {
+                if (std.ascii.eqlIgnoreCase(existing.name, raw_name)) {
+                    fail("{s}(\"{s}\"): a target named \"{s}\" already exists", .{ function, raw_name, existing.name });
+                }
+            }
+
+            const name = try b.arena.dupe(u8, raw_name);
+
+            const sources = try copyStrings(b.arena, o.sources, .{ .function = function, .target = name, .field = "sources" });
+            if (sources.len == 0) {
+                fail("{s}(\"{s}\"): sources is missing", .{ function, name });
+            }
 
             const includes = try copyStrings(b.arena, o.includes, .{ .function = function, .target = name, .field = "includes" });
 
