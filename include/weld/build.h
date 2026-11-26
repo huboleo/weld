@@ -35,13 +35,20 @@ typedef enum {
 } weld_cpp_standard;
 
 typedef struct {
+    // Required, and unique among all targets, whatever the case ("app" and "App" clash). Only
+    // letters, digits, '_', '-' and '.', and no '.' or '-' at the start.
     const char* name;
+    // Required. A file stands for itself, a directory for every C and C++ source under it.
     weld_strings sources;
+    // Optional.
     weld_strings includes;
+    // Optional, WELD_C_GNU17 if left out.
     weld_c_standard c_standard;
+    // Optional, WELD_CPP_23 if left out.
     weld_cpp_standard cpp_standard;
 } weld_executable_options;
 
+// The same fields as weld_executable_options.
 typedef struct {
     const char* name;
     weld_strings sources;

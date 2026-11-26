@@ -47,9 +47,10 @@ pub const CppStandard = enum(c_uint) {
     @"c++23",
 };
 
-/// Whether `name` can be a target's name: only letters, digits, `_`, `-` and `.`, and no `.` at
-/// the start. Names become paths in weld-out/, so this keeps them out of other directories
-/// (`../foo`, `a/b`) and rules out `.` and `..`.
+/// Whether `name` can be a target's name: only letters, digits, `_`, `-` and `.`, and no `.` or
+/// `-` at the start. Names become paths in weld-out/, so this keeps them out of other directories
+/// (`../foo`, `a/b`) and rules out `.` and `..`. A leading `-` would look like a flag on the
+/// command line (`weld build -app`) and to the compiler.
 pub fn isValidName(name: []const u8) bool {
     for (name) |character| {
         if (std.ascii.isAlphanumeric(character)) continue;
@@ -60,7 +61,7 @@ pub fn isValidName(name: []const u8) bool {
         }
     }
 
-    return !std.mem.startsWith(u8, name, ".");
+    return !std.mem.startsWith(u8, name, ".") and !std.mem.startsWith(u8, name, "-");
 }
 
 // ---------------------------------------------------------------- tests
@@ -82,8 +83,10 @@ test "isValidName: names that would leave weld-out/" {
     try testing.expect(!isValidName(".."));
 }
 
-test "isValidName: a dot at the start is not allowed" {
+test "isValidName: a dot or a dash at the start is not allowed" {
     try testing.expect(!isValidName(".hidden"));
+    try testing.expect(!isValidName("-app")); // looks like a flag
+    try testing.expect(isValidName("a-")); // a dash is fine after the start
 }
 
 test "isValidName: everything else is not allowed" {

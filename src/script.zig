@@ -378,7 +378,7 @@ test "runtime: a name that would leave weld-out/ is reported" {
         \\    weld_executable_options o = { .name = "../app", .sources = WELD_LIST("src/") };
         \\    weld_add_executable(b, &o);
         \\}
-    , "weld_add_executable(\"../app\"): a name may only contain letters, digits, '_', '-' and '.', and can't start with '.'\n");
+    , "weld_add_executable(\"../app\"): a name may only contain letters, digits, '_', '-' and '.', and can't start with '.' or '-'\n");
 }
 
 test "runtime: two targets with the same name are reported, whatever the kind and case" {

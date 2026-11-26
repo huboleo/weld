@@ -1,4 +1,5 @@
 const std = @import("std");
+const description = @import("description");
 const context = @import("context.zig");
 const Context = context.Context;
 const Language = context.Language;
@@ -28,13 +29,32 @@ pub fn run(ctx: Context, args: []const [:0]const u8) !void {
         return error.AlreadyReported;
     }
 
-    const project_name = resolveProjectName(ctx) catch |err| switch (err) {
+    const directory_name = resolveProjectName(ctx) catch |err| switch (err) {
         error.EmptyProjectName => {
             try ctx.err.print("project name can't be empty\n", .{});
             return error.AlreadyReported;
         },
         else => return err,
     };
+
+    const project_name = toValidName(ctx.arena, directory_name) catch |err| switch (err) {
+        error.NonAscii => {
+            try ctx.err.print("directory name '{s}' contains non-ASCII characters, rename the directory\n", .{directory_name});
+            return error.AlreadyReported;
+        },
+        error.InvalidStart => {
+            try ctx.err.print("directory name '{s}' can't start with '.' or '-', rename the directory\n", .{directory_name});
+            return error.AlreadyReported;
+        },
+        error.EmptyProjectName => {
+            try ctx.err.print("directory name '{s}' has no letters or digits, rename the directory\n", .{directory_name});
+            return error.AlreadyReported;
+        },
+        else => return err,
+    };
+    if (!std.mem.eql(u8, project_name, directory_name)) {
+        try ctx.out.print("note: '{s}' isn't a valid target name, using '{s}'\n", .{ directory_name, project_name });
+    }
 
     switch (options.project_type) {
         .library => {
@@ -217,6 +237,42 @@ fn resolveProjectName(ctx: Context) ![]const u8 {
     return lib_name;
 }
 
+/// Turns a directory name into a valid target name, slug style: `my  project (copy)` becomes
+/// `my-project-copy`. A valid name is returned unchanged. Non-ASCII characters and a leading `.`
+/// or `-` can't be fixed without guessing, so they are errors.
+fn toValidName(allocator: std.mem.Allocator, name: []const u8) ![]const u8 {
+    if (description.isValidName(name)) return name;
+    if (std.mem.startsWith(u8, name, ".") or std.mem.startsWith(u8, name, "-")) return error.InvalidStart;
+
+    const slug = try allocator.alloc(u8, name.len);
+    var len: usize = 0;
+    // Set by `-` and every character a name doesn't allow. The `-` is written only before the
+    // next allowed character, so a run of them becomes one `-`, and none is left at either end.
+    var separator = false;
+
+    for (name) |character| {
+        if (!std.ascii.isAscii(character)) return error.NonAscii;
+
+        if (std.ascii.isAlphanumeric(character) or character == '_' or character == '.') {
+            if (separator and len > 0) {
+                slug[len] = '-';
+                len += 1;
+            }
+            separator = false;
+            slug[len] = character;
+            len += 1;
+        } else {
+            separator = true;
+        }
+    }
+
+    if (len == 0) return error.EmptyProjectName;
+    // E.g. ` .app`: the space is dropped, and the name would start with `.`.
+    if (!description.isValidName(slug[0..len])) return error.InvalidStart;
+
+    return slug[0..len];
+}
+
 fn transformNameIntoIdentifier(allocator: std.mem.Allocator, name: []const u8) ![]u8 {
     if (std.ascii.isDigit(name[0])) {
         return error.InvalidIdentifier;
@@ -383,6 +439,39 @@ test "transformNameIntoIdentifier: replaces characters that are not allowed in C
 
 test "transformNameIntoIdentifier: a leading digit is an error" {
     try testing.expectError(error.InvalidIdentifier, transformNameIntoIdentifier(testing.allocator, "2048-game"));
+}
+
+test "toValidName: turns other ASCII characters into -, one for each run" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    const cases = [_][2][]const u8{
+        .{ "my-lib", "my-lib" }, // already valid: unchanged
+        .{ "a--b", "a--b" }, // valid too, so its dashes are kept
+        .{ "my project", "my-project" },
+        .{ "my  project", "my-project" },
+        .{ "a - b", "a-b" },
+        .{ "project (copy)", "project-copy" },
+        .{ " app ", "app" }, // nothing left at either end
+        .{ "c++ tools", "c-tools" },
+    };
+
+    for (cases) |case| {
+        const name = try toValidName(arena.allocator(), case[0]);
+        try testing.expectEqualStrings(case[1], name);
+        try testing.expect(description.isValidName(name));
+    }
+}
+
+test "toValidName: what can't be fixed without guessing is an error" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    try testing.expectError(error.NonAscii, toValidName(allocator, "zażółć"));
+    try testing.expectError(error.InvalidStart, toValidName(allocator, ".hidden"));
+    try testing.expectError(error.InvalidStart, toValidName(allocator, "-app"));
+    try testing.expectError(error.InvalidStart, toValidName(allocator, " .app"));
+    try testing.expectError(error.EmptyProjectName, toValidName(allocator, "(!)"));
 }
 
 test "fillTemplate: replaces both placeholders everywhere" {

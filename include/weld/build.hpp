@@ -25,6 +25,7 @@ enum class CppStandard {
     cpp23 = WELD_CPP_23,
 };
 
+// The fields are described at weld_executable_options in build.h. An empty name counts as left out.
 struct ExecutableOptions {
     std::string name = {};
     std::vector<std::string> sources = {};
@@ -33,6 +34,7 @@ struct ExecutableOptions {
     CppStandard cpp_standard = {};
 };
 
+// The same fields as ExecutableOptions.
 struct LibraryOptions {
     std::string name = {};
     std::vector<std::string> sources = {};

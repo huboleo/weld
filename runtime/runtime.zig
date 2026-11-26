@@ -115,7 +115,7 @@ fn addTarget(b: *Build, options: Options) !*description.Target {
                 fail("{s}: name is missing", .{function});
             }
             if (!description.isValidName(raw_name)) {
-                fail("{s}(\"{s}\"): a name may only contain letters, digits, '_', '-' and '.', and can't start with '.'", .{ function, raw_name });
+                fail("{s}(\"{s}\"): a name may only contain letters, digits, '_', '-' and '.', and can't start with '.' or '-'", .{ function, raw_name });
             }
 
             for (b.targets.items) |existing| {
