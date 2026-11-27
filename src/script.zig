@@ -47,7 +47,7 @@ fn writeRuntime(ctx: Context) !void {
 /// Compiler errors are shown to the user unchanged.
 fn compileRunner(ctx: Context, language: Language) !void {
     const argv: []const []const u8 = switch (language) {
-        .c => &.{ "zig", "cc", "-I", runtime_include_dir, "build.c", runtime_lib_path, "-o", runner_path },
+        .c => &.{ "zig", "cc", "-std=gnu17", "-I", runtime_include_dir, "build.c", runtime_lib_path, "-o", runner_path },
         .@"c++" => &.{ "zig", "c++", "-std=c++23", "-I", runtime_include_dir, "build.cpp", runtime_bridge_path, runtime_lib_path, "-o", runner_path },
     };
 
@@ -61,6 +61,15 @@ fn compileRunner(ctx: Context, language: Language) !void {
         try ctx.err.print("{s}", .{result.stderr});
         return error.AlreadyReported;
     }
+}
+
+/// The build script's command as clangd should see it: the same flags as in compileRunner,
+/// without the runtime library and the output, which only matter for linking.
+pub fn compileCommand(language: Language) []const []const u8 {
+    return switch (language) {
+        .c => &.{ "clang", "-std=gnu17", "-I", runtime_include_dir, "-c", "build.c" },
+        .@"c++" => &.{ "clang++", "-std=c++23", "-I", runtime_include_dir, "-c", "build.cpp" },
+    };
 }
 
 /// Runs the build runner, which writes the description to description_path.
@@ -99,7 +108,7 @@ fn readDescription(ctx: Context) !Description {
 }
 
 /// Returns the language of the project's build script, or an error if build scripts exist in both languages or none
-fn findScript(ctx: Context) !Language {
+pub fn findScript(ctx: Context) !Language {
     const has_c = try context.fileExists(ctx, "build.c");
     const has_cpp = try context.fileExists(ctx, "build.cpp");
 

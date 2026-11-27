@@ -2,6 +2,7 @@ const std = @import("std");
 const context = @import("context.zig");
 const description = @import("description");
 const paths = @import("paths.zig");
+const script = @import("script.zig");
 
 const Context = context.Context;
 const Description = description.Description;
@@ -18,6 +19,17 @@ const Entry = struct {
 pub fn write(ctx: Context, desc: Description) !void {
     const directory = try ctx.cwd.realPathFileAlloc(ctx.io, ".", ctx.arena);
     var entries: std.ArrayList(Entry) = .empty;
+
+    // The build script comes first, so clangd also knows how to read build.c or build.cpp.
+    const language = try script.findScript(ctx);
+    try entries.append(ctx.arena, .{
+        .directory = directory,
+        .file = switch (language) {
+            .c => "build.c",
+            .@"c++" => "build.cpp",
+        },
+        .arguments = script.compileCommand(language),
+    });
 
     for (desc.targets) |target| {
         const files = try paths.expand(ctx, target.sources);
@@ -143,7 +155,7 @@ test "write: one entry for every file of every target" {
     var ctx = testContext(tmp.dir, &output.writer);
     ctx.arena = arena.allocator();
     for ([_][]const u8{ "weld-out", "src", "net" }) |dir| try tmp.dir.createDirPath(testing.io, dir);
-    for ([_][]const u8{ "src/main.cpp", "src/util.c", "net/http.c" }) |file| {
+    for ([_][]const u8{ "build.c", "src/main.cpp", "src/util.c", "net/http.c" }) |file| {
         try tmp.dir.writeFile(testing.io, .{ .sub_path = file, .data = "" });
     }
 
@@ -168,10 +180,36 @@ test "write: one entry for every file of every target" {
     const http_c = "net" ++ std.fs.path.sep_str ++ "http.c";
 
     try testing.expectEqualDeep(@as([]const Entry, &.{
+        .{ .directory = root, .file = "build.c", .arguments = &.{ "clang", "-std=gnu17", "-I", "weld-out/runtime/include", "-c", "build.c" } },
         .{ .directory = root, .file = main_cpp, .arguments = &.{ "clang++", "-std=c++23", "-c", main_cpp, "-I", "include/" } },
         .{ .directory = root, .file = util_c, .arguments = &.{ "clang", "-std=gnu17", "-c", util_c, "-I", "include/" } },
         .{ .directory = root, .file = http_c, .arguments = &.{ "clang", "-std=gnu17", "-c", http_c } },
     }), entries);
+}
+
+test "write: a build.cpp gets clang++ and C++23" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var output: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer output.deinit();
+    var ctx = testContext(tmp.dir, &output.writer);
+    ctx.arena = arena.allocator();
+    try tmp.dir.createDirPath(testing.io, "weld-out");
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "build.cpp", .data = "" });
+
+    try write(ctx, .{ .version = description.current_version, .targets = &.{} });
+
+    const json = try tmp.dir.readFileAlloc(testing.io, compile_commands_path, ctx.arena, .unlimited);
+    const entries = try std.json.parseFromSliceLeaky([]const Entry, ctx.arena, json, .{});
+
+    try testing.expectEqual(1, entries.len);
+    try testing.expectEqualStrings("build.cpp", entries[0].file);
+    try testing.expectEqualDeep(
+        @as([]const []const u8, &.{ "clang++", "-std=c++23", "-I", "weld-out/runtime/include", "-c", "build.cpp" }),
+        entries[0].arguments,
+    );
 }
 
 test "write: a missing source is reported and no file is written" {
@@ -184,6 +222,7 @@ test "write: a missing source is reported and no file is written" {
     var ctx = testContext(tmp.dir, &output.writer);
     ctx.arena = arena.allocator();
     try tmp.dir.createDirPath(testing.io, "weld-out");
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "build.c", .data = "" });
 
     try testing.expectError(error.AlreadyReported, write(ctx, .{
         .version = description.current_version,
