@@ -116,6 +116,7 @@ pub fn run(ctx: Context, args: []const [:0]const u8) !void {
 
     // Runs the new build script once, so clangd works in the project right away.
     try writeClangd(ctx);
+    try writeClangFormat(ctx, options.language);
     const desc = try script.describe(ctx);
     try compile_commands.write(ctx, desc, try zig_flags.get(ctx));
     try ctx.out.print("wrote weld-out/compile_commands.json\n", .{});
@@ -230,6 +231,16 @@ fn isInsideGitRepo(ctx: Context) !bool {
 
 fn writeClangd(ctx: Context) !void {
     _ = try writeNewFile(ctx, ".clangd", @embedFile("templates/clangd"));
+}
+
+/// One style for the whole project, picked by its language. clang-format can tell C from C++
+/// files, but it counts every .h as C++, so a C project's headers would get the C++ style.
+fn writeClangFormat(ctx: Context, language: Language) !void {
+    const template = switch (language) {
+        .c => @embedFile("templates/clang-format-c"),
+        .@"c++" => @embedFile("templates/clang-format-cpp"),
+    };
+    _ = try writeNewFile(ctx, ".clang-format", template);
 }
 
 fn writeGitignore(ctx: Context) !void {
@@ -418,6 +429,24 @@ test "writeBuildScript: never overwrites an existing file" {
     defer testing.allocator.free(content);
     try testing.expectEqualStrings("mine", content);
     try testing.expectEqualStrings("build.c already exists\n", output.written());
+}
+
+test "writeClangFormat: C projects get char *p, C++ projects char* p" {
+    for ([_]Language{ .c, .@"c++" }, [_][]const u8{ "PointerAlignment: Right", "PointerAlignment: Left" }) |language, alignment| {
+        var tmp = testing.tmpDir(.{});
+        defer tmp.cleanup();
+        var output: std.Io.Writer.Allocating = .init(testing.allocator);
+        defer output.deinit();
+        const ctx = testContext(tmp.dir, &output.writer);
+
+        try writeClangFormat(ctx, language);
+
+        const content = try tmp.dir.readFileAlloc(testing.io, ".clang-format", testing.allocator, .limited(4096));
+        defer testing.allocator.free(content);
+        try testing.expect(std.mem.indexOf(u8, content, alignment) != null);
+        // A single style for the whole file: no per-language sections, which older formatters reject.
+        try testing.expect(std.mem.indexOf(u8, content, "Language:") == null);
+    }
 }
 
 test "writeGitignore: ignores weld-out" {

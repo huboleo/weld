@@ -1,0 +1,14 @@
+# Formatting for this project, used by `weld fmt` and by editors through clangd.
+BasedOnStyle: LLVM
+IndentWidth: 4
+TabWidth: 4
+ColumnLimit: 100
+PointerAlignment: Left
+DerivePointerAlignment: false
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortLambdasOnASingleLine: All
+AllowShortBlocksOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortCaseLabelsOnASingleLine: false
+InsertNewlineAtEOF: true

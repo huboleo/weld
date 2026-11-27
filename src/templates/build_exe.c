@@ -1,6 +1,6 @@
 #include <weld/build.h>
 
-void build(weld_build* b) {
+void build(weld_build *b) {
     weld_executable_options options = {
         .name = "WELD_NAME",
         .sources = WELD_LIST("src/"),
