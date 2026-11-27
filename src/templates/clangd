@@ -1,0 +1,3 @@
+# weld writes compile_commands.json into weld-out/, where clangd doesn't look by itself.
+CompileFlags:
+  CompilationDatabase: weld-out

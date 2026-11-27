@@ -1,6 +1,8 @@
 const std = @import("std");
 const description = @import("description");
 const context = @import("context.zig");
+const script = @import("script.zig");
+const compile_commands = @import("compile_commands.zig");
 const Context = context.Context;
 const Language = context.Language;
 const fileExists = context.fileExists;
@@ -111,6 +113,12 @@ pub fn run(ctx: Context, args: []const [:0]const u8) !void {
 
     try writeBuildScript(ctx, options.language, options.project_type, project_name);
 
+    // Runs the new build script once, so clangd works in the project right away.
+    try writeClangd(ctx);
+    const desc = try script.describe(ctx);
+    try compile_commands.write(ctx, desc);
+    try ctx.out.print("wrote weld-out/compile_commands.json\n", .{});
+
     if (options.git) {
         try initGit(ctx);
     }
@@ -217,6 +225,10 @@ fn isInsideGitRepo(ctx: Context) !bool {
         .cwd = childCwd(ctx),
     });
     return result.term.success();
+}
+
+fn writeClangd(ctx: Context) !void {
+    _ = try writeNewFile(ctx, ".clangd", @embedFile("templates/clangd"));
 }
 
 fn writeGitignore(ctx: Context) !void {
@@ -540,6 +552,17 @@ test "run: a C library project gets a filled header and source" {
     try testing.expect(std.mem.indexOf(u8, source, "#include <my-lib/my-lib.h>") != null);
 
     try project_dir.access(testing.io, "build.c", .{});
+
+    const clangd = try project_dir.readFileAlloc(testing.io, ".clangd", testing.allocator, .limited(4096));
+    defer testing.allocator.free(clangd);
+    try testing.expectEqualStrings(@embedFile("templates/clangd"), clangd);
+
+    // The new build script was run: the script and the library's source both have an entry.
+    const commands = try project_dir.readFileAlloc(testing.io, "weld-out/compile_commands.json", testing.allocator, .unlimited);
+    defer testing.allocator.free(commands);
+    try testing.expect(std.mem.indexOf(u8, commands, "\"file\": \"build.c\"") != null);
+    const my_lib_c = "src" ++ std.fs.path.sep_str ++ "my-lib.c";
+    try testing.expect(std.mem.indexOf(u8, commands, "\"file\": \"" ++ my_lib_c ++ "\"") != null);
 }
 
 test "run: a library name starting with a digit creates nothing" {
