@@ -12,7 +12,9 @@ const build_hpp = @embedFile("weld/build.hpp");
 const bridge = @embedFile("bridge.cpp");
 
 // Where the runtime is written, inside the project.
-const runtime_include_dir = "weld-out/runtime/include"; // passed to -I
+// Passed as -isystem, not -I: the headers are weld's, so like a system header they get no
+// warnings or clang-tidy hints in the user's project.
+const runtime_include_dir = "weld-out/runtime/include";
 const runtime_header_dir = runtime_include_dir ++ "/weld"; // so <weld/build.h> resolves
 const runtime_c_header_path = runtime_header_dir ++ "/build.h";
 const runtime_cpp_header_path = runtime_header_dir ++ "/build.hpp";
@@ -47,8 +49,8 @@ fn writeRuntime(ctx: Context) !void {
 /// Compiler errors are shown to the user unchanged.
 fn compileRunner(ctx: Context, language: Language) !void {
     const argv: []const []const u8 = switch (language) {
-        .c => &.{ "zig", "cc", "-std=gnu17", "-I", runtime_include_dir, "build.c", runtime_lib_path, "-o", runner_path },
-        .@"c++" => &.{ "zig", "c++", "-std=c++23", "-I", runtime_include_dir, "build.cpp", runtime_bridge_path, runtime_lib_path, "-o", runner_path },
+        .c => &.{ "zig", "cc", "-std=gnu17", "-isystem", runtime_include_dir, "build.c", runtime_lib_path, "-o", runner_path },
+        .@"c++" => &.{ "zig", "c++", "-std=c++23", "-isystem", runtime_include_dir, "build.cpp", runtime_bridge_path, runtime_lib_path, "-o", runner_path },
     };
 
     const result = try std.process.run(ctx.arena, ctx.io, .{
@@ -67,8 +69,8 @@ fn compileRunner(ctx: Context, language: Language) !void {
 /// without the runtime library and the output, which only matter for linking.
 pub fn compileCommand(language: Language) []const []const u8 {
     return switch (language) {
-        .c => &.{ "clang", "-std=gnu17", "-I", runtime_include_dir, "-c", "build.c" },
-        .@"c++" => &.{ "clang++", "-std=c++23", "-I", runtime_include_dir, "-c", "build.cpp" },
+        .c => &.{ "clang", "-std=gnu17", "-isystem", runtime_include_dir, "-c", "build.c" },
+        .@"c++" => &.{ "clang++", "-std=c++23", "-isystem", runtime_include_dir, "-c", "build.cpp" },
     };
 }
 

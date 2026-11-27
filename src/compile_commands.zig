@@ -238,7 +238,7 @@ test "write: one entry for every file of every target" {
     const http_c = "net" ++ std.fs.path.sep_str ++ "http.c";
 
     try testing.expectEqualDeep(@as([]const Entry, &.{
-        .{ .directory = root, .file = "build.c", .arguments = &.{ "clang", "-std=gnu17", "-I", "weld-out/runtime/include", "-c", "build.c", "--zig-c" } },
+        .{ .directory = root, .file = "build.c", .arguments = &.{ "clang", "-std=gnu17", "-isystem", "weld-out/runtime/include", "-c", "build.c", "--zig-c" } },
         .{ .directory = root, .file = main_cpp, .arguments = &.{ "clang++", "-std=c++23", "-c", main_cpp, "-I", "include/", "-iquote", "src", "--zig-cpp" } },
         .{ .directory = root, .file = util_c, .arguments = &.{ "clang", "-std=gnu17", "-c", util_c, "-I", "include/", "-iquote", "src", "--zig-c" } },
         .{ .directory = root, .file = http_c, .arguments = &.{ "clang", "-std=gnu17", "-c", http_c, "-iquote", "net", "--zig-c" } },
@@ -265,7 +265,7 @@ test "write: a build.cpp gets clang++ and C++23" {
     try testing.expectEqual(1, entries.len);
     try testing.expectEqualStrings("build.cpp", entries[0].file);
     try testing.expectEqualDeep(
-        @as([]const []const u8, &.{ "clang++", "-std=c++23", "-I", "weld-out/runtime/include", "-c", "build.cpp", "--zig-cpp" }),
+        @as([]const []const u8, &.{ "clang++", "-std=c++23", "-isystem", "weld-out/runtime/include", "-c", "build.cpp", "--zig-cpp" }),
         entries[0].arguments,
     );
 }

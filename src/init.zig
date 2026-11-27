@@ -117,6 +117,7 @@ pub fn run(ctx: Context, args: []const [:0]const u8) !void {
     // Runs the new build script once, so clangd works in the project right away.
     try writeClangd(ctx);
     try writeClangFormat(ctx, options.language);
+    try writeClangTidy(ctx);
     const desc = try script.describe(ctx);
     try compile_commands.write(ctx, desc, try zig_flags.get(ctx));
     try ctx.out.print("wrote weld-out/compile_commands.json\n", .{});
@@ -241,6 +242,11 @@ fn writeClangFormat(ctx: Context, language: Language) !void {
         .@"c++" => @embedFile("templates/clang-format-cpp"),
     };
     _ = try writeNewFile(ctx, ".clang-format", template);
+}
+
+/// The same checks for C and C++: the C++-only ones don't apply to C files.
+fn writeClangTidy(ctx: Context) !void {
+    _ = try writeNewFile(ctx, ".clang-tidy", @embedFile("templates/clang-tidy"));
 }
 
 fn writeGitignore(ctx: Context) !void {
@@ -586,6 +592,10 @@ test "run: a C library project gets a filled header and source" {
     const clangd = try project_dir.readFileAlloc(testing.io, ".clangd", testing.allocator, .limited(4096));
     defer testing.allocator.free(clangd);
     try testing.expectEqualStrings(@embedFile("templates/clangd"), clangd);
+
+    const clang_tidy = try project_dir.readFileAlloc(testing.io, ".clang-tidy", testing.allocator, .limited(8192));
+    defer testing.allocator.free(clang_tidy);
+    try testing.expectEqualStrings(@embedFile("templates/clang-tidy"), clang_tidy);
 
     // The new build script was run: the script and the library's source both have an entry.
     const commands = try project_dir.readFileAlloc(testing.io, "weld-out/compile_commands.json", testing.allocator, .unlimited);
