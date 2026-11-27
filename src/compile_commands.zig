@@ -16,7 +16,11 @@ const Entry = struct {
     arguments: []const []const u8,
 };
 
-pub fn write(ctx: Context, desc: Description) !void {
+/// Zig's flags for clangd, one set per language (from `zig_flags.get`). They are passed in, so
+/// that the tests don't depend on the machine's Zig.
+const ZigFlags = @import("zig_flags.zig").Flags;
+
+pub fn write(ctx: Context, desc: Description, zig_flags: ZigFlags) !void {
     const directory = try ctx.cwd.realPathFileAlloc(ctx.io, ".", ctx.arena);
     var entries: std.ArrayList(Entry) = .empty;
 
@@ -28,14 +32,20 @@ pub fn write(ctx: Context, desc: Description) !void {
             .c => "build.c",
             .@"c++" => "build.cpp",
         },
-        .arguments = script.compileCommand(language),
+        .arguments = try std.mem.concat(ctx.arena, []const u8, &.{
+            script.compileCommand(language),
+            switch (language) {
+                .c => zig_flags.c_files,
+                .@"c++" => zig_flags.cpp_files,
+            },
+        }),
     });
 
     for (desc.targets) |target| {
         const sources = try paths.expand(ctx, target.sources);
 
         for (sources.files) |file| {
-            const arguments = try prepareArguments(ctx, target, sources.directories, file);
+            const arguments = try prepareArguments(ctx, target, sources.directories, zig_flags, file);
             const entry: Entry = .{
                 .directory = directory,
                 .file = file,
@@ -56,10 +66,11 @@ pub fn write(ctx: Context, desc: Description) !void {
 /// `source_directories` are the target's directory entries in `sources`. Each one becomes
 /// `-iquote`, so `#include "net/http.h"` works from any depth below it, while `<...>` includes
 /// never pick up a project file.
-fn prepareArguments(ctx: Context, target: Target, source_directories: []const []const u8, file: []const u8) ![]const []const u8 {
+fn prepareArguments(ctx: Context, target: Target, source_directories: []const []const u8, zig_flags: ZigFlags, file: []const u8) ![]const []const u8 {
     var arguments: std.ArrayList([]const u8) = .empty;
+    const is_c = std.mem.eql(u8, std.fs.path.extension(file), ".c");
 
-    if (std.mem.eql(u8, std.fs.path.extension(file), ".c")) {
+    if (is_c) {
         try arguments.append(ctx.arena, "clang");
         try arguments.append(ctx.arena, standardFlag(target.c_standard));
     } else {
@@ -79,6 +90,8 @@ fn prepareArguments(ctx: Context, target: Target, source_directories: []const []
         try arguments.append(ctx.arena, "-iquote");
         try arguments.append(ctx.arena, directory);
     }
+
+    try arguments.appendSlice(ctx.arena, if (is_c) zig_flags.c_files else zig_flags.cpp_files);
 
     return arguments.items;
 }
@@ -118,7 +131,33 @@ fn expectArguments(expected: []const []const u8, target: Target, source_director
     var ctx = testContext(tmp.dir, &output.writer);
     ctx.arena = arena.allocator();
 
-    try testing.expectEqualDeep(expected, try prepareArguments(ctx, target, source_directories, file));
+    try testing.expectEqualDeep(expected, try prepareArguments(ctx, target, source_directories, no_zig_flags, file));
+}
+
+const no_zig_flags: ZigFlags = .{ .c_files = &.{}, .cpp_files = &.{} };
+
+// Stand-ins for Zig's real flags, which depend on the machine.
+const test_zig_flags: ZigFlags = .{ .c_files = &.{"--zig-c"}, .cpp_files = &.{"--zig-cpp"} };
+
+test "prepareArguments: Zig's flags for the file's language come last" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var output: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer output.deinit();
+    var ctx = testContext(tmp.dir, &output.writer);
+    ctx.arena = arena.allocator();
+    const target = testTarget(&.{}, &.{});
+
+    try testing.expectEqualDeep(
+        @as([]const []const u8, &.{ "clang", "-std=gnu17", "-c", "main.c", "--zig-c" }),
+        try prepareArguments(ctx, target, &.{}, test_zig_flags, "main.c"),
+    );
+    try testing.expectEqualDeep(
+        @as([]const []const u8, &.{ "clang++", "-std=c++23", "-c", "main.cpp", "--zig-cpp" }),
+        try prepareArguments(ctx, target, &.{}, test_zig_flags, "main.cpp"),
+    );
 }
 
 test "prepareArguments: C files use clang, C++ files clang++" {
@@ -184,7 +223,7 @@ test "write: one entry for every file of every target" {
             testTarget(&.{"src/"}, &.{"include/"}),
             testTarget(&.{"net/"}, &.{}),
         },
-    });
+    }, test_zig_flags);
 
     // The path is spelled out because clangd only finds a file with exactly this name.
     const json = try tmp.dir.readFileAlloc(testing.io, "weld-out/compile_commands.json", ctx.arena, .unlimited);
@@ -199,10 +238,10 @@ test "write: one entry for every file of every target" {
     const http_c = "net" ++ std.fs.path.sep_str ++ "http.c";
 
     try testing.expectEqualDeep(@as([]const Entry, &.{
-        .{ .directory = root, .file = "build.c", .arguments = &.{ "clang", "-std=gnu17", "-I", "weld-out/runtime/include", "-c", "build.c" } },
-        .{ .directory = root, .file = main_cpp, .arguments = &.{ "clang++", "-std=c++23", "-c", main_cpp, "-I", "include/", "-iquote", "src" } },
-        .{ .directory = root, .file = util_c, .arguments = &.{ "clang", "-std=gnu17", "-c", util_c, "-I", "include/", "-iquote", "src" } },
-        .{ .directory = root, .file = http_c, .arguments = &.{ "clang", "-std=gnu17", "-c", http_c, "-iquote", "net" } },
+        .{ .directory = root, .file = "build.c", .arguments = &.{ "clang", "-std=gnu17", "-I", "weld-out/runtime/include", "-c", "build.c", "--zig-c" } },
+        .{ .directory = root, .file = main_cpp, .arguments = &.{ "clang++", "-std=c++23", "-c", main_cpp, "-I", "include/", "-iquote", "src", "--zig-cpp" } },
+        .{ .directory = root, .file = util_c, .arguments = &.{ "clang", "-std=gnu17", "-c", util_c, "-I", "include/", "-iquote", "src", "--zig-c" } },
+        .{ .directory = root, .file = http_c, .arguments = &.{ "clang", "-std=gnu17", "-c", http_c, "-iquote", "net", "--zig-c" } },
     }), entries);
 }
 
@@ -218,7 +257,7 @@ test "write: a build.cpp gets clang++ and C++23" {
     try tmp.dir.createDirPath(testing.io, "weld-out");
     try tmp.dir.writeFile(testing.io, .{ .sub_path = "build.cpp", .data = "" });
 
-    try write(ctx, .{ .version = description.current_version, .targets = &.{} });
+    try write(ctx, .{ .version = description.current_version, .targets = &.{} }, test_zig_flags);
 
     const json = try tmp.dir.readFileAlloc(testing.io, compile_commands_path, ctx.arena, .unlimited);
     const entries = try std.json.parseFromSliceLeaky([]const Entry, ctx.arena, json, .{});
@@ -226,7 +265,7 @@ test "write: a build.cpp gets clang++ and C++23" {
     try testing.expectEqual(1, entries.len);
     try testing.expectEqualStrings("build.cpp", entries[0].file);
     try testing.expectEqualDeep(
-        @as([]const []const u8, &.{ "clang++", "-std=c++23", "-I", "weld-out/runtime/include", "-c", "build.cpp" }),
+        @as([]const []const u8, &.{ "clang++", "-std=c++23", "-I", "weld-out/runtime/include", "-c", "build.cpp", "--zig-cpp" }),
         entries[0].arguments,
     );
 }
@@ -246,7 +285,7 @@ test "write: a missing source is reported and no file is written" {
     try testing.expectError(error.AlreadyReported, write(ctx, .{
         .version = description.current_version,
         .targets = &.{testTarget(&.{"src/"}, &.{})},
-    }));
+    }, test_zig_flags));
 
     try testing.expectEqualStrings("source 'src/' not found\n", output.written());
     try testing.expectError(error.FileNotFound, tmp.dir.statFile(testing.io, compile_commands_path, .{}));

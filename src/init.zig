@@ -3,6 +3,7 @@ const description = @import("description");
 const context = @import("context.zig");
 const script = @import("script.zig");
 const compile_commands = @import("compile_commands.zig");
+const zig_flags = @import("zig_flags.zig");
 const Context = context.Context;
 const Language = context.Language;
 const fileExists = context.fileExists;
@@ -116,7 +117,7 @@ pub fn run(ctx: Context, args: []const [:0]const u8) !void {
     // Runs the new build script once, so clangd works in the project right away.
     try writeClangd(ctx);
     const desc = try script.describe(ctx);
-    try compile_commands.write(ctx, desc);
+    try compile_commands.write(ctx, desc, try zig_flags.get(ctx));
     try ctx.out.print("wrote weld-out/compile_commands.json\n", .{});
 
     if (options.git) {
@@ -563,6 +564,10 @@ test "run: a C library project gets a filled header and source" {
     try testing.expect(std.mem.indexOf(u8, commands, "\"file\": \"build.c\"") != null);
     const my_lib_c = "src" ++ std.fs.path.sep_str ++ "my-lib.c";
     try testing.expect(std.mem.indexOf(u8, commands, "\"file\": \"" ++ my_lib_c ++ "\"") != null);
+
+    // Zig's flags reached the entries, so clangd reads them with Zig's headers.
+    try testing.expect(std.mem.indexOf(u8, commands, "\"--target=") != null);
+    try testing.expect(std.mem.indexOf(u8, commands, "\"-nostdlibinc\"") != null);
 }
 
 test "run: a library name starting with a digit creates nothing" {

@@ -37,4 +37,5 @@ test {
     _ = @import("script.zig");
     _ = @import("paths.zig");
     _ = @import("compile_commands.zig");
+    _ = @import("zig_flags.zig");
 }
