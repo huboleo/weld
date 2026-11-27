@@ -543,6 +543,51 @@ test "describe: runs a C++ build script and returns its targets" {
     try testing.expectEqual(.@"c++20", library.cpp_standard);
 }
 
+/// What src/fixtures/every_field.c and every_field.cpp declare. Both scripts must give exactly this.
+const every_field_targets = [_]description.Target{
+    .{
+        .kind = .executable,
+        .name = "tool",
+        .sources = &.{ "tool/", "extra/tool_main.c" },
+        .includes = &.{ "tool/include/", "shared/" },
+        .c_standard = .c11,
+        .cpp_standard = .@"c++17",
+    },
+    .{
+        .kind = .library,
+        .name = "shapes",
+        .sources = &.{ "lib/", "extra/circle.c", "extra/square.c" },
+        .includes = &.{ "include/", "third_party/" },
+        .c_standard = .gnu23,
+        .cpp_standard = .@"c++20",
+    },
+};
+
+/// Runs `script` as the project's `script_name` and checks that it declares every_field_targets.
+fn expectEveryField(script_name: []const u8, script: []const u8) !void {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var output: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer output.deinit();
+    var ctx = testContext(tmp.dir, &output.writer);
+    ctx.arena = arena.allocator();
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = script_name, .data = script });
+
+    const desc = try describe(ctx);
+
+    try testing.expectEqualDeep(@as([]const description.Target, &every_field_targets), desc.targets);
+}
+
+test "describe: every field of every weld_* call reaches the description, from C" {
+    try expectEveryField("build.c", @embedFile("fixtures/every_field.c"));
+}
+
+test "describe: every field reaches the description through the C++ wrapper too" {
+    try expectEveryField("build.cpp", @embedFile("fixtures/every_field.cpp"));
+}
+
 test "describe: a directory without a build script writes nothing" {
     var arena: std.heap.ArenaAllocator = .init(testing.allocator);
     defer arena.deinit();
