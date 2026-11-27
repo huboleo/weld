@@ -32,10 +32,10 @@ pub fn write(ctx: Context, desc: Description) !void {
     });
 
     for (desc.targets) |target| {
-        const files = try paths.expand(ctx, target.sources);
+        const sources = try paths.expand(ctx, target.sources);
 
-        for (files) |file| {
-            const arguments = try prepareArguments(ctx, target, file);
+        for (sources.files) |file| {
+            const arguments = try prepareArguments(ctx, target, sources.directories, file);
             const entry: Entry = .{
                 .directory = directory,
                 .file = file,
@@ -53,7 +53,10 @@ pub fn write(ctx: Context, desc: Description) !void {
     });
 }
 
-fn prepareArguments(ctx: Context, target: Target, file: []const u8) ![]const []const u8 {
+/// `source_directories` are the target's directory entries in `sources`. Each one becomes
+/// `-iquote`, so `#include "net/http.h"` works from any depth below it, while `<...>` includes
+/// never pick up a project file.
+fn prepareArguments(ctx: Context, target: Target, source_directories: []const []const u8, file: []const u8) ![]const []const u8 {
     var arguments: std.ArrayList([]const u8) = .empty;
 
     if (std.mem.eql(u8, std.fs.path.extension(file), ".c")) {
@@ -70,6 +73,11 @@ fn prepareArguments(ctx: Context, target: Target, file: []const u8) ![]const []c
     for (target.includes) |include| {
         try arguments.append(ctx.arena, "-I");
         try arguments.append(ctx.arena, include);
+    }
+
+    for (source_directories) |directory| {
+        try arguments.append(ctx.arena, "-iquote");
+        try arguments.append(ctx.arena, directory);
     }
 
     return arguments.items;
@@ -100,7 +108,7 @@ fn testTarget(sources: []const []const u8, includes: []const []const u8) Target 
 }
 
 /// Checks the arguments `prepareArguments` gives for `file` in `target`.
-fn expectArguments(expected: []const []const u8, target: Target, file: []const u8) !void {
+fn expectArguments(expected: []const []const u8, target: Target, source_directories: []const []const u8, file: []const u8) !void {
     var arena: std.heap.ArenaAllocator = .init(testing.allocator);
     defer arena.deinit();
     var tmp = testing.tmpDir(.{});
@@ -110,17 +118,17 @@ fn expectArguments(expected: []const []const u8, target: Target, file: []const u
     var ctx = testContext(tmp.dir, &output.writer);
     ctx.arena = arena.allocator();
 
-    try testing.expectEqualDeep(expected, try prepareArguments(ctx, target, file));
+    try testing.expectEqualDeep(expected, try prepareArguments(ctx, target, source_directories, file));
 }
 
 test "prepareArguments: C files use clang, C++ files clang++" {
     const target = testTarget(&.{}, &.{});
 
-    try expectArguments(&.{ "clang", "-std=gnu17", "-c", "main.c" }, target, "main.c");
-    try expectArguments(&.{ "clang++", "-std=c++23", "-c", "main.cc" }, target, "main.cc");
-    try expectArguments(&.{ "clang++", "-std=c++23", "-c", "main.cpp" }, target, "main.cpp");
-    try expectArguments(&.{ "clang++", "-std=c++23", "-c", "main.cxx" }, target, "main.cxx");
-    try expectArguments(&.{ "clang++", "-std=c++23", "-c", "main.c++" }, target, "main.c++");
+    try expectArguments(&.{ "clang", "-std=gnu17", "-c", "main.c" }, target, &.{}, "main.c");
+    try expectArguments(&.{ "clang++", "-std=c++23", "-c", "main.cc" }, target, &.{}, "main.cc");
+    try expectArguments(&.{ "clang++", "-std=c++23", "-c", "main.cpp" }, target, &.{}, "main.cpp");
+    try expectArguments(&.{ "clang++", "-std=c++23", "-c", "main.cxx" }, target, &.{}, "main.cxx");
+    try expectArguments(&.{ "clang++", "-std=c++23", "-c", "main.c++" }, target, &.{}, "main.c++");
 }
 
 test "prepareArguments: the standards come from the target" {
@@ -128,20 +136,31 @@ test "prepareArguments: the standards come from the target" {
     target.c_standard = .c11;
     target.cpp_standard = .@"c++20";
 
-    try expectArguments(&.{ "clang", "-std=c11", "-c", "main.c" }, target, "main.c");
-    try expectArguments(&.{ "clang++", "-std=c++20", "-c", "main.cpp" }, target, "main.cpp");
+    try expectArguments(&.{ "clang", "-std=c11", "-c", "main.c" }, target, &.{}, "main.c");
+    try expectArguments(&.{ "clang++", "-std=c++20", "-c", "main.cpp" }, target, &.{}, "main.cpp");
 }
 
 test "prepareArguments: every include gets its own -I, in order" {
     try expectArguments(
         &.{ "clang", "-std=gnu17", "-c", "main.c", "-I", "include/" },
         testTarget(&.{}, &.{"include/"}),
+        &.{},
         "main.c",
     );
     try expectArguments(
         &.{ "clang", "-std=gnu17", "-c", "main.c", "-I", "include/", "-I", "deps/json/" },
         testTarget(&.{}, &.{ "include/", "deps/json/" }),
+        &.{},
         "main.c",
+    );
+}
+
+test "prepareArguments: every source directory gets its own -iquote, after the includes" {
+    try expectArguments(
+        &.{ "clang", "-std=gnu17", "-c", "src/main.c", "-I", "include/", "-iquote", "src", "-iquote", "lib" },
+        testTarget(&.{}, &.{"include/"}),
+        &.{ "src", "lib" },
+        "src/main.c",
     );
 }
 
@@ -181,9 +200,9 @@ test "write: one entry for every file of every target" {
 
     try testing.expectEqualDeep(@as([]const Entry, &.{
         .{ .directory = root, .file = "build.c", .arguments = &.{ "clang", "-std=gnu17", "-I", "weld-out/runtime/include", "-c", "build.c" } },
-        .{ .directory = root, .file = main_cpp, .arguments = &.{ "clang++", "-std=c++23", "-c", main_cpp, "-I", "include/" } },
-        .{ .directory = root, .file = util_c, .arguments = &.{ "clang", "-std=gnu17", "-c", util_c, "-I", "include/" } },
-        .{ .directory = root, .file = http_c, .arguments = &.{ "clang", "-std=gnu17", "-c", http_c } },
+        .{ .directory = root, .file = main_cpp, .arguments = &.{ "clang++", "-std=c++23", "-c", main_cpp, "-I", "include/", "-iquote", "src" } },
+        .{ .directory = root, .file = util_c, .arguments = &.{ "clang", "-std=gnu17", "-c", util_c, "-I", "include/", "-iquote", "src" } },
+        .{ .directory = root, .file = http_c, .arguments = &.{ "clang", "-std=gnu17", "-c", http_c, "-iquote", "net" } },
     }), entries);
 }
 

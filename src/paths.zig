@@ -2,10 +2,20 @@ const std = @import("std");
 const context = @import("context.zig");
 const Context = context.Context;
 
-/// Returns the source files that `paths` stand for, relative to the project root.
-/// A file stands for itself, a directory for every source under it, recursively.
-pub fn expand(ctx: Context, paths: []const []const u8) ![]const []const u8 {
+/// What a target's `sources` stand for, relative to the project root.
+pub const Sources = struct {
+    /// Sorted and without duplicates.
+    files: []const []const u8,
+    /// The entries that are directories, passed to the compiler as `-iquote`. They keep the
+    /// order of `sources`, because the first directory with a header wins.
+    directories: []const []const u8,
+};
+
+/// Finds the source files that `paths` stand for: a file stands for itself, a directory for
+/// every source under it, recursively.
+pub fn expand(ctx: Context, paths: []const []const u8) !Sources {
     var files: std.ArrayList([]const u8) = .empty;
+    var directories: std.ArrayList([]const u8) = .empty;
 
     for (paths) |path| {
         const stat = ctx.cwd.statFile(ctx.io, path, .{}) catch |err| switch (err) {
@@ -17,6 +27,9 @@ pub fn expand(ctx: Context, paths: []const []const u8) ![]const []const u8 {
         };
 
         if (stat.kind == .directory) {
+            const directory = try std.fs.path.resolveAlloc(ctx.arena, &.{path});
+            if (!contains(directories.items, directory)) try directories.append(ctx.arena, directory);
+
             var dir = try ctx.cwd.openDir(ctx.io, path, .{ .iterate = true });
             defer dir.close(ctx.io);
 
@@ -43,7 +56,18 @@ pub fn expand(ctx: Context, paths: []const []const u8) ![]const []const u8 {
 
     std.mem.sort([]const u8, files.items, {}, lessThan);
 
-    return removeDuplicates(files.items);
+    return .{
+        .files = removeDuplicates(files.items),
+        .directories = directories.items,
+    };
+}
+
+fn contains(list: []const []const u8, path: []const u8) bool {
+    for (list) |item| {
+        if (std.mem.eql(u8, item, path)) return true;
+    }
+
+    return false;
 }
 
 /// Moves the different files to the front of `files` and returns that part. `files` must be
@@ -153,9 +177,9 @@ test "expand: a directory gives every source under it, sorted" {
     ctx.arena = arena.allocator();
     try createFiles(tmp.dir, &.{ "src/net/http.cpp", "src/net/http.h", "src/main.c", "src/README", "other.c" });
 
-    const files = try expand(ctx, &.{"src/"});
+    const sources = try expand(ctx, &.{"src/"});
 
-    try testing.expectEqualDeep(@as([]const []const u8, &.{ main_c, http_cpp }), files);
+    try testing.expectEqualDeep(@as([]const []const u8, &.{ main_c, http_cpp }), sources.files);
 }
 
 test "expand: a file gives itself" {
@@ -169,9 +193,10 @@ test "expand: a file gives itself" {
     ctx.arena = arena.allocator();
     try createFiles(tmp.dir, &.{ "src/main.c", "src/net/http.cpp" });
 
-    const files = try expand(ctx, &.{"src/main.c"});
+    const sources = try expand(ctx, &.{"src/main.c"});
 
-    try testing.expectEqualDeep(@as([]const []const u8, &.{main_c}), files);
+    try testing.expectEqualDeep(@as([]const []const u8, &.{main_c}), sources.files);
+    try testing.expectEqual(0, sources.directories.len); // only directory entries give -iquote
 }
 
 test "expand: a file found several times is returned once" {
@@ -185,9 +210,26 @@ test "expand: a file found several times is returned once" {
     ctx.arena = arena.allocator();
     try createFiles(tmp.dir, &.{ "src/main.c", "src/net/http.cpp" });
 
-    const files = try expand(ctx, &.{ "src/", "src", "./src", "src//net/", "src/main.c", "./src/main.c" });
+    const sources = try expand(ctx, &.{ "src/", "src", "./src", "src//net/", "src/main.c", "./src/main.c" });
 
-    try testing.expectEqualDeep(@as([]const []const u8, &.{ main_c, http_cpp }), files);
+    try testing.expectEqualDeep(@as([]const []const u8, &.{ main_c, http_cpp }), sources.files);
+}
+
+test "expand: each directory is returned once, in the order of sources" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var output: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer output.deinit();
+    var ctx = testContext(tmp.dir, &output.writer);
+    ctx.arena = arena.allocator();
+    try createFiles(tmp.dir, &.{ "src/net/http.cpp", "lib/util.c" });
+
+    const sources = try expand(ctx, &.{ "src/net/", "src/", "./src", "lib", "lib/util.c" });
+
+    const src_net = "src" ++ std.fs.path.sep_str ++ "net";
+    try testing.expectEqualDeep(@as([]const []const u8, &.{ src_net, "src", "lib" }), sources.directories);
 }
 
 test "expand: a directory without sources gives nothing" {
@@ -201,9 +243,9 @@ test "expand: a directory without sources gives nothing" {
     ctx.arena = arena.allocator();
     try createFiles(tmp.dir, &.{"include/app.h"});
 
-    const files = try expand(ctx, &.{"include/"});
+    const sources = try expand(ctx, &.{"include/"});
 
-    try testing.expectEqual(0, files.len);
+    try testing.expectEqual(0, sources.files.len);
 }
 
 test "expand: a missing path is reported" {

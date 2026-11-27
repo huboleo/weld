@@ -39,6 +39,8 @@ typedef struct {
     // letters, digits, '_', '-' and '.', and no '.' or '-' at the start.
     const char* name;
     // Required. A file stands for itself, a directory for every C and C++ source under it.
+    // A directory is also searched for #include "...", so "net/http.h" is found from any file
+    // below it. It is never searched for #include <...>.
     weld_strings sources;
     // Optional.
     weld_strings includes;
