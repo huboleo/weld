@@ -8,6 +8,7 @@ pub const Context = struct {
     io: Io,
     arena: std.mem.Allocator,
     cwd: Io.Dir,
+    environ: *const std.process.Environ.Map,
     out: *Io.Writer,
     err: *Io.Writer,
 };
@@ -33,12 +34,16 @@ pub fn childCwd(ctx: Context) std.process.Child.Cwd {
     return if (ctx.cwd.handle == Io.Dir.cwd().handle) .inherit else .{ .dir = ctx.cwd };
 }
 
+/// No environment variables at all, for tests that don't set any.
+const empty_environ: std.process.Environ.Map = .init(std.testing.allocator);
+
 /// A Context for tests: files go to `dir`, and both output streams to `writer`.
 pub fn testContext(dir: Io.Dir, writer: *Io.Writer) Context {
     return .{
         .io = std.testing.io,
         .arena = std.testing.allocator,
         .cwd = dir,
+        .environ = &empty_environ,
         .out = writer,
         .err = writer,
     };

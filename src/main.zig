@@ -16,6 +16,7 @@ pub fn main(init: std.process.Init) !u8 {
         .io = io,
         .arena = init.arena.allocator(),
         .cwd = Io.Dir.cwd(),
+        .environ = init.environ_map,
         .out = &stdout_file_writer.interface,
         .err = &stderr_file_writer.interface,
     };
