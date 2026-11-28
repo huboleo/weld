@@ -4,6 +4,25 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    b.dependOnFileContents(b.path("src/zig-release.json"));
+    const release_path = b.root.join(b.allocator, "src/zig-release.json") catch @panic("OOM");
+    const release_bytes = release_path.root_dir.handle.readFileAlloc(
+        b.graph.io,
+        release_path.sub_path,
+        b.allocator,
+        .limited(64 * 1024),
+    ) catch |err| std.process.fatal("can't read src/zig-release.json: {t}", .{err});
+
+    const release = std.json.parseFromSliceLeaky(std.json.Value, b.allocator, release_bytes, .{}) catch |err|
+        std.process.fatal("src/zig-release.json is not valid JSON: {t}", .{err});
+
+    const zig_version = release.object.get("version").?.string;
+    const host_key = b.fmt("{s}-{s}", .{ @tagName(target.result.cpu.arch), @tagName(target.result.os.tag) });
+    const entry = release.object.get(host_key) orelse
+        std.process.fatal("Zig {s} has no release for {s}", .{ zig_version, host_key });
+    const zig_tarball = entry.object.get("tarball").?.string;
+    const zig_shasum = entry.object.get("shasum").?.string;
+
     const description = b.createModule(.{
         .root_source_file = b.path("shared/description.zig"),
     });
@@ -16,6 +35,13 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
+
+    const zig_release = b.addOptions();
+    zig_release.addOption([]const u8, "version", zig_version);
+    zig_release.addOption([]const u8, "tarball", zig_tarball);
+    zig_release.addOption([]const u8, "shasum", zig_shasum);
+
+    exe.root_module.addOptions("zig_release", zig_release);
 
     b.installArtifact(exe);
 

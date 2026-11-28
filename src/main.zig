@@ -38,4 +38,5 @@ test {
     _ = @import("paths.zig");
     _ = @import("compile_commands.zig");
     _ = @import("zig_flags.zig");
+    _ = @import("tooling.zig");
 }
